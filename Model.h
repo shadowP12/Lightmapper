@@ -55,8 +55,6 @@ public:
 
     blast::IndexType GetIndexType() { return index_type; }
 
-    blast::GfxInputLayout* GetInputLayout() { return input_layout; }
-
     blast::GfxBuffer* GetVertexBuffer() { return vertex_buffer; }
 
     blast::GfxBuffer* GetIndexBuffer() { return index_buffer; }
@@ -71,7 +69,6 @@ private:
     uint8_t* uv1_data = nullptr;
     uint8_t* index_data = nullptr;
     blast::IndexType index_type;
-    blast::GfxInputLayout* input_layout = nullptr;
     blast::GfxBuffer* vertex_buffer = nullptr;
     blast::GfxBuffer* index_buffer = nullptr;
 };

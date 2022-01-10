@@ -3,13 +3,6 @@
 
 #include <glm.hpp>
 
-struct Vertex {
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 uv0;
-    glm::vec2 uv1;
-};
-
 void CombindVertexData(void* dst, void* src, uint32_t vertexCount, uint32_t attributeSize, uint32_t offset, uint32_t stride, uint32_t size) {
     uint8_t* dstData = (uint8_t*)dst + offset;
     uint8_t* srcData = (uint8_t*)src;
@@ -42,36 +35,6 @@ void Model::GenerateGPUResource(blast::GfxDevice* device) {
     CombindVertexData(vertex_data, normal_data, vertex_count, sizeof(glm::vec3), offsetof(Vertex, normal), sizeof(Vertex), sizeof(glm::vec3) * vertex_count);
     CombindVertexData(vertex_data, uv0_data, vertex_count, sizeof(glm::vec2), offsetof(Vertex, uv0), sizeof(Vertex), sizeof(glm::vec2) * vertex_count);
     CombindVertexData(vertex_data, uv1_data, vertex_count, sizeof(glm::vec2), offsetof(Vertex, uv1), sizeof(Vertex), sizeof(glm::vec2) * vertex_count);
-
-    input_layout = new blast::GfxInputLayout();
-    blast::GfxInputLayout::Element input_element;
-    input_element.semantic = blast::SEMANTIC_POSITION;
-    input_element.format = blast::FORMAT_R32G32B32_FLOAT;
-    input_element.binding = 0;
-    input_element.location = 0;
-    input_element.offset = offsetof(Vertex, position);
-    input_layout->elements.push_back(input_element);
-
-    input_element.semantic = blast::SEMANTIC_NORMAL;
-    input_element.format = blast::FORMAT_R32G32B32_FLOAT;
-    input_element.binding = 0;
-    input_element.location = 1;
-    input_element.offset = offsetof(Vertex, normal);
-    input_layout->elements.push_back(input_element);
-
-    input_element.semantic = blast::SEMANTIC_TEXCOORD0;
-    input_element.format = blast::FORMAT_R32G32_FLOAT;
-    input_element.binding = 0;
-    input_element.location = 2;
-    input_element.offset = offsetof(Vertex, uv0);
-    input_layout->elements.push_back(input_element);
-
-    input_element.semantic = blast::SEMANTIC_TEXCOORD1;
-    input_element.format = blast::FORMAT_R32G32_FLOAT;
-    input_element.binding = 0;
-    input_element.location = 3;
-    input_element.offset = offsetof(Vertex, uv1);
-    input_layout->elements.push_back(input_element);
 
     blast::GfxCommandBuffer* copy_cmd = device->RequestCommandBuffer(blast::QUEUE_COPY);
     blast::GfxBufferDesc buffer_desc;
@@ -107,7 +70,6 @@ void Model::GenerateGPUResource(blast::GfxDevice* device) {
 }
 
 void Model::ReleaseGPUResource(blast::GfxDevice* device) {
-    SAFE_DELETE(input_layout);
     device->DestroyBuffer(vertex_buffer);
     device->DestroyBuffer(index_buffer);
 }

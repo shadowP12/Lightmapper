@@ -30,7 +30,15 @@ static std::string ReadFileData(const std::string& path) {
     return std::string((std::istreambuf_iterator<char>(*stream)), std::istreambuf_iterator<char>());
 }
 
+static std::pair<blast::GfxShader*, blast::GfxShader*> CompileShaderProgram(const std::string& vs_path, const std::string& fs_path);
+
 static void RefreshSwapchain(void* window, uint32_t width, uint32_t height);
+
+static void CursorPositionCallback(GLFWwindow* window, double pos_x, double pos_y);
+
+static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
+
+static void MouseScrollCallback(GLFWwindow* window, double offset_x, double offset_y);
 
 blast::ShaderCompiler* g_shader_compiler = nullptr;
 blast::GfxDevice* g_device = nullptr;
@@ -38,7 +46,28 @@ blast::GfxSwapChain* g_swapchain = nullptr;
 blast::GfxShader* blit_vert_shader = nullptr;
 blast::GfxShader* blit_frag_shader = nullptr;
 blast::GfxPipeline* blit_pipeline = nullptr;
+blast::GfxShader* scene_vert_shader = nullptr;
+blast::GfxShader* scene_frag_shader = nullptr;
+blast::GfxPipeline* scene_pipeline = nullptr;
+blast::GfxBuffer* object_ub = nullptr;
 Model* quad_model = nullptr;
+
+struct ObjectUniforms {
+    glm::mat4 model_matrix;
+    glm::mat4 view_matrix;
+    glm::mat4 proj_matrix;
+};
+
+struct Camera {
+    glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f);
+    glm::vec3 front = glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 right = glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec2 start_point = glm::vec2(-1.0f, -1.0f);
+    float yaw = -90.0f;
+    float pitch = 0.0f;
+    bool grabbing = false;
+} camera;
 
 int main() {
     g_shader_compiler = new blast::VulkanShaderCompiler();
@@ -47,39 +76,47 @@ int main() {
 
     // 加载shader资源
     {
-        blast::ShaderCompileDesc compile_desc;
-        compile_desc.code = ReadFileData(ProjectDir + "/Resources/Shaders/blit.vert");
-        compile_desc.stage = blast::SHADER_STAGE_VERT;
-        blast::ShaderCompileResult compile_result = g_shader_compiler->Compile(compile_desc);
-        blast::GfxShaderDesc shader_desc;
-        shader_desc.stage = blast::SHADER_STAGE_VERT;
-        shader_desc.bytecode = compile_result.bytes.data();
-        shader_desc.bytecode_length = compile_result.bytes.size() * sizeof(uint32_t);
-        blit_vert_shader = g_device->CreateShader(shader_desc);
+        auto shaders = CompileShaderProgram(ProjectDir + "/Resources/Shaders/blit.vert", ProjectDir + "/Resources/Shaders/blit.frag");
+        blit_vert_shader = shaders.first;
+        blit_frag_shader = shaders.second;
     }
-
     {
-        blast::ShaderCompileDesc compile_desc;
-        compile_desc.code = ReadFileData(ProjectDir + "/Resources/Shaders/blit.frag");
-        compile_desc.stage = blast::SHADER_STAGE_FRAG;
-        blast::ShaderCompileResult compile_result = g_shader_compiler->Compile(compile_desc);
-        blast::GfxShaderDesc shader_desc;
-        shader_desc.stage = blast::SHADER_STAGE_FRAG;
-        shader_desc.bytecode = compile_result.bytes.data();
-        shader_desc.bytecode_length = compile_result.bytes.size() * sizeof(uint32_t);
-        blit_frag_shader = g_device->CreateShader(shader_desc);
+        auto shaders = CompileShaderProgram(ProjectDir + "/Resources/Shaders/scene.vert", ProjectDir + "/Resources/Shaders/scene.frag");
+        scene_vert_shader = shaders.first;
+        scene_frag_shader = shaders.second;
     }
 
     // 加载场景资源
+    std::vector<ObjectUniforms> object_storages;
     std::vector<Model*> builtin_scene = ImportScene(ProjectDir + "/Resources/Scenes/builtin.gltf");
     for (uint32_t i = 0; i < builtin_scene.size(); ++i) {
         builtin_scene[i]->GenerateGPUResource(g_device);
     }
     quad_model = builtin_scene[0];
+    object_storages.push_back({});
+
+    std::vector<Model*> display_scene = ImportScene(ProjectDir + "/Resources/Scenes/test.gltf");
+    for (uint32_t i = 0; i < display_scene.size(); ++i) {
+        display_scene[i]->GenerateGPUResource(g_device);
+        object_storages.push_back({});
+    }
+
+    // 加载GPU Buffer
+    {
+        blast::GfxBufferDesc buffer_desc = {};
+        buffer_desc.size = sizeof(ObjectUniforms) * object_storages.size();
+        buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        buffer_desc.res_usage = blast::RESOURCE_USAGE_UNIFORM_BUFFER;
+        object_ub = g_device->CreateBuffer(buffer_desc);
+    }
 
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(800, 600, "Lightmapper", nullptr, nullptr);
+    glfwSetCursorPosCallback(window, CursorPositionCallback);
+    glfwSetMouseButtonCallback(window, MouseButtonCallback);
+    glfwSetScrollCallback(window, MouseScrollCallback);
+
     int frame_width = 0, frame_height = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -96,6 +133,80 @@ int main() {
             RefreshSwapchain(glfwGetWin32Window(window), frame_width, frame_height);
         }
 
+        blast::GfxCommandBuffer* cmd = g_device->RequestCommandBuffer(blast::QUEUE_GRAPHICS);
+
+        // 更新Object Uniform
+        object_storages[0].model_matrix = glm::toMat4(glm::quat(glm::vec3(glm::radians(-90.0f), 0.0f, 0.0f)));
+        object_storages[0].view_matrix = glm::mat4(1.0f);
+        object_storages[0].proj_matrix = glm::mat4(1.0f);
+        for (uint32_t i = 0; i < display_scene.size(); ++i) {
+            object_storages[i + 1].model_matrix = glm::mat4(1.0f);
+            object_storages[i + 1].view_matrix = glm::mat4(1.0f);
+            object_storages[i + 1].proj_matrix = glm::mat4(1.0f);
+        }
+        g_device->UpdateBuffer(cmd, object_ub, object_storages.data(), sizeof(ObjectUniforms) * object_storages.size());
+
+        // 绘制场景
+        g_device->RenderPassBegin(cmd, g_swapchain);
+        for (uint32_t i = 0; i < display_scene.size(); ++i) {
+            blast::Viewport viewport;
+            viewport.x = 0;
+            viewport.y = 0;
+            viewport.w = frame_width;
+            viewport.h = frame_height;
+            g_device->BindViewports(cmd, 1, &viewport);
+
+            blast::Rect rect;
+            rect.left = 0;
+            rect.top = 0;
+            rect.right = frame_width;
+            rect.bottom = frame_height;
+            g_device->BindScissorRects(cmd, 1, &rect);
+
+            g_device->BindPipeline(cmd, scene_pipeline);
+
+            g_device->BindConstantBuffer(cmd, object_ub, 0, sizeof(ObjectUniforms), (i + 1) * sizeof(ObjectUniforms));
+
+            blast::GfxBuffer* vertex_buffers[] = {display_scene[i]->GetVertexBuffer()};
+            uint64_t vertex_offsets[] = {0};
+            g_device->BindVertexBuffers(cmd, vertex_buffers, 0, 1, vertex_offsets);
+
+            g_device->BindIndexBuffer(cmd, display_scene[i]->GetIndexBuffer(), display_scene[i]->GetIndexType(), 0);
+
+            g_device->DrawIndexed(cmd, display_scene[i]->GetIndexCount(), 0, 0);
+        }
+
+        // 绘制平面
+        {
+            blast::Viewport viewport;
+            viewport.x = frame_width * 0.75f;
+            viewport.y = frame_height * 0.75f;
+            viewport.w = frame_width * 0.25f;
+            viewport.h = frame_height * 0.25f;
+            g_device->BindViewports(cmd, 1, &viewport);
+
+            blast::Rect rect;
+            rect.left = 0;
+            rect.top = 0;
+            rect.right = frame_width;
+            rect.bottom = frame_height;
+            g_device->BindScissorRects(cmd, 1, &rect);
+
+            g_device->BindPipeline(cmd, blit_pipeline);
+
+            g_device->BindConstantBuffer(cmd, object_ub, 0, sizeof(ObjectUniforms), 0);
+
+            blast::GfxBuffer* vertex_buffers[] = {quad_model->GetVertexBuffer()};
+            uint64_t vertex_offsets[] = {0};
+            g_device->BindVertexBuffers(cmd, vertex_buffers, 0, 1, vertex_offsets);
+
+            g_device->BindIndexBuffer(cmd, quad_model->GetIndexBuffer(), quad_model->GetIndexType(), 0);
+
+            g_device->DrawIndexed(cmd, quad_model->GetIndexCount(), 0, 0);
+        }
+        g_device->RenderPassEnd(cmd);
+
+        g_device->SubmitAllCommandBuffer();
     }
     glfwDestroyWindow(window);
     glfwTerminate();
@@ -105,14 +216,27 @@ int main() {
         builtin_scene[i]->ReleaseGPUResource(g_device);
         SAFE_DELETE(builtin_scene[i]);
     }
+    for (uint32_t i = 0; i < display_scene.size(); ++i) {
+        display_scene[i]->ReleaseGPUResource(g_device);
+        SAFE_DELETE(display_scene[i]);
+    }
 
     // 清空shader资源
     g_device->DestroyShader(blit_vert_shader);
     g_device->DestroyShader(blit_frag_shader);
+    g_device->DestroyShader(scene_vert_shader);
+    g_device->DestroyShader(scene_frag_shader);
+
+    // 销毁GPU Buffer
+    g_device->DestroyBuffer(object_ub);
 
     // 清空管线资源
     if (blit_pipeline) {
         g_device->DestroyPipeline(blit_pipeline);
+    }
+
+    if (scene_pipeline) {
+        g_device->DestroyPipeline(scene_pipeline);
     }
 
     g_device->DestroySwapChain(g_swapchain);
@@ -130,23 +254,53 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
     swapchain_desc.clear_color[0] = 1.0f;
     g_swapchain = g_device->CreateSwapChain(swapchain_desc, g_swapchain);
 
+    blast::GfxInputLayout input_layout = {};
+    blast::GfxInputLayout::Element input_element;
+    input_element.semantic = blast::SEMANTIC_POSITION;
+    input_element.format = blast::FORMAT_R32G32B32_FLOAT;
+    input_element.binding = 0;
+    input_element.location = 0;
+    input_element.offset = offsetof(Vertex, position);
+    input_layout.elements.push_back(input_element);
+
+    input_element.semantic = blast::SEMANTIC_NORMAL;
+    input_element.format = blast::FORMAT_R32G32B32_FLOAT;
+    input_element.binding = 0;
+    input_element.location = 1;
+    input_element.offset = offsetof(Vertex, normal);
+    input_layout.elements.push_back(input_element);
+
+    input_element.semantic = blast::SEMANTIC_TEXCOORD0;
+    input_element.format = blast::FORMAT_R32G32_FLOAT;
+    input_element.binding = 0;
+    input_element.location = 2;
+    input_element.offset = offsetof(Vertex, uv0);
+    input_layout.elements.push_back(input_element);
+
+    input_element.semantic = blast::SEMANTIC_TEXCOORD1;
+    input_element.format = blast::FORMAT_R32G32_FLOAT;
+    input_element.binding = 0;
+    input_element.location = 3;
+    input_element.offset = offsetof(Vertex, uv1);
+    input_layout.elements.push_back(input_element);
+
+    blast::GfxBlendState blend_state = {};
+    blend_state.rt[0].src_factor = blast::BLEND_ONE;
+    blend_state.rt[0].dst_factor = blast::BLEND_ZERO;
+    blend_state.rt[0].src_factor_alpha = blast::BLEND_ONE;
+    blend_state.rt[0].dst_factor_alpha = blast::BLEND_ZERO;
+
+    blast::GfxDepthStencilState depth_stencil_state = {};
+    depth_stencil_state.depth_test = true;
+    depth_stencil_state.depth_write = true;
+
+    blast::GfxRasterizerState rasterizer_state = {};
+    rasterizer_state.cull_mode = blast::CULL_NONE;
+    rasterizer_state.front_face = blast::FRONT_FACE_CW;
+    rasterizer_state.fill_mode = blast::FILL_SOLID;
+
     // 创建blit管线
     {
-        blast::GfxBlendState blend_state = {};
-        blend_state.rt[0].src_factor = blast::BLEND_ONE;
-        blend_state.rt[0].dst_factor = blast::BLEND_ZERO;
-        blend_state.rt[0].src_factor_alpha = blast::BLEND_ONE;
-        blend_state.rt[0].dst_factor_alpha = blast::BLEND_ZERO;
-
-        blast::GfxDepthStencilState depth_stencil_state = {};
-        depth_stencil_state.depth_test = true;
-        depth_stencil_state.depth_write = true;
-
-        blast::GfxRasterizerState rasterizer_state = {};
-        rasterizer_state.cull_mode = blast::CULL_NONE;
-        rasterizer_state.front_face = blast::FRONT_FACE_CW;
-        rasterizer_state.fill_mode = blast::FILL_SOLID;
-
         if (blit_pipeline) {
             g_device->DestroyPipeline(blit_pipeline);
         }
@@ -155,11 +309,71 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
         pipeline_desc.sc = g_swapchain;
         pipeline_desc.vs = blit_vert_shader;
         pipeline_desc.fs = blit_frag_shader;
-        pipeline_desc.il = quad_model->GetInputLayout();
+        pipeline_desc.il = &input_layout;
         pipeline_desc.bs = &blend_state;
         pipeline_desc.rs = &rasterizer_state;
         pipeline_desc.dss = &depth_stencil_state;
         pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_TRI_LIST;
         blit_pipeline = g_device->CreatePipeline(pipeline_desc);
     }
+
+    // 创建scene管线
+    {
+        if (scene_pipeline) {
+            g_device->DestroyPipeline(scene_pipeline);
+        }
+
+        blast::GfxPipelineDesc pipeline_desc;
+        pipeline_desc.sc = g_swapchain;
+        pipeline_desc.vs = scene_vert_shader;
+        pipeline_desc.fs = scene_frag_shader;
+        pipeline_desc.il = &input_layout;
+        pipeline_desc.bs = &blend_state;
+        pipeline_desc.rs = &rasterizer_state;
+        pipeline_desc.dss = &depth_stencil_state;
+        pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_TRI_LIST;
+        scene_pipeline = g_device->CreatePipeline(pipeline_desc);
+    }
+}
+
+static std::pair<blast::GfxShader*, blast::GfxShader*> CompileShaderProgram(const std::string& vs_path, const std::string& fs_path) {
+    blast::GfxShader* vert_shader = nullptr;
+    blast::GfxShader* frag_shader = nullptr;
+    {
+        blast::ShaderCompileDesc compile_desc;
+        compile_desc.code = ReadFileData(vs_path);
+        compile_desc.stage = blast::SHADER_STAGE_VERT;
+        blast::ShaderCompileResult compile_result = g_shader_compiler->Compile(compile_desc);
+        blast::GfxShaderDesc shader_desc;
+        shader_desc.stage = blast::SHADER_STAGE_VERT;
+        shader_desc.bytecode = compile_result.bytes.data();
+        shader_desc.bytecode_length = compile_result.bytes.size() * sizeof(uint32_t);
+        vert_shader = g_device->CreateShader(shader_desc);
+    }
+
+    {
+        blast::ShaderCompileDesc compile_desc;
+        compile_desc.code = ReadFileData(fs_path);
+        compile_desc.stage = blast::SHADER_STAGE_FRAG;
+        blast::ShaderCompileResult compile_result = g_shader_compiler->Compile(compile_desc);
+        blast::GfxShaderDesc shader_desc;
+        shader_desc.stage = blast::SHADER_STAGE_FRAG;
+        shader_desc.bytecode = compile_result.bytes.data();
+        shader_desc.bytecode_length = compile_result.bytes.size() * sizeof(uint32_t);
+        frag_shader = g_device->CreateShader(shader_desc);
+    }
+
+    return std::make_pair(vert_shader, frag_shader);
+}
+
+static void CursorPositionCallback(GLFWwindow* window, double pos_x, double pos_y) {
+
+}
+
+static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+
+}
+
+static void MouseScrollCallback(GLFWwindow* window, double offset_x, double offset_y) {
+
 }
