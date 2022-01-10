@@ -139,10 +139,18 @@ int main() {
         object_storages[0].model_matrix = glm::toMat4(glm::quat(glm::vec3(glm::radians(-90.0f), 0.0f, 0.0f)));
         object_storages[0].view_matrix = glm::mat4(1.0f);
         object_storages[0].proj_matrix = glm::mat4(1.0f);
+
+        glm::mat4 view_matrix = glm::lookAt(camera.position, camera.position + camera.front, camera.up);
+
+        float fov = glm::radians(45.0);
+        float aspect = frame_width / frame_height;
+        glm::mat4 proj_matrix = glm::perspective(fov, aspect, 0.1f, 100.0f);
+        proj_matrix[1][1] *= -1;
+
         for (uint32_t i = 0; i < display_scene.size(); ++i) {
-            object_storages[i + 1].model_matrix = glm::mat4(1.0f);
-            object_storages[i + 1].view_matrix = glm::mat4(1.0f);
-            object_storages[i + 1].proj_matrix = glm::mat4(1.0f);
+            object_storages[i + 1].model_matrix = display_scene[i]->GetModelMatriax();
+            object_storages[i + 1].view_matrix = view_matrix;
+            object_storages[i + 1].proj_matrix = proj_matrix;
         }
         g_device->UpdateBuffer(cmd, object_ub, object_storages.data(), sizeof(ObjectUniforms) * object_storages.size());
 
@@ -367,13 +375,46 @@ static std::pair<blast::GfxShader*, blast::GfxShader*> CompileShaderProgram(cons
 }
 
 static void CursorPositionCallback(GLFWwindow* window, double pos_x, double pos_y) {
+    if (!camera.grabbing) {
+        return;
+    }
 
+    glm::vec2 offset = camera.start_point - glm::vec2(pos_x, pos_y);
+    camera.start_point = glm::vec2(pos_x, pos_y);
+
+    camera.yaw -= offset.x * 0.1f;
+    camera.pitch += offset.y * 0.1f;
+    glm::vec3 front;
+    front.x = cos(glm::radians(camera.yaw)) * cos(glm::radians(camera.pitch));
+    front.y = sin(glm::radians(camera.pitch));
+    front.z = sin(glm::radians(camera.yaw)) * cos(glm::radians(camera.pitch));
+    camera.front = glm::normalize(front);
+    camera.right = glm::normalize(glm::cross(camera.front, glm::vec3(0, 1, 0)));
+    camera.up = glm::normalize(glm::cross(camera.right, camera.front));
 }
 
 static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
-
+    double x, y;
+    glfwGetCursorPos(window, &x, &y);
+    switch (action) {
+        case 0:
+            // Button Up
+            if (button == 1) {
+                camera.grabbing = false;
+            }
+            break;
+        case 1:
+            // Button Down
+            if (button == 1) {
+                camera.grabbing = true;
+                camera.start_point = glm::vec2(x, y);
+            }
+            break;
+        default:
+            break;
+    }
 }
 
 static void MouseScrollCallback(GLFWwindow* window, double offset_x, double offset_y) {
-
+    camera.position += camera.front * (float)offset_y * 0.1f;
 }
