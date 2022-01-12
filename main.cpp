@@ -11,6 +11,8 @@
 #include <Blast/Utility/VulkanShaderCompiler.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#include <xatlas.h>
+
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -96,6 +98,22 @@ int main() {
     object_storages.push_back({});
 
     std::vector<Model*> display_scene = ImportScene(ProjectDir + "/Resources/Scenes/test.gltf");
+
+    // 生成atlas并为场景模型分配atlas uv
+    xatlas::Atlas* atlas = xatlas::Create();
+    for (uint32_t i = 0; i < display_scene.size(); ++i) {
+        xatlas::MeshDecl mesh_decl;
+        mesh_decl.vertexCount = display_scene[i]->GetVertexCount();
+        mesh_decl.vertexPositionData = display_scene[i]->GetPositionData();
+        mesh_decl.vertexPositionStride = sizeof(glm::vec3);
+        mesh_decl.indexData = display_scene[i]->GetIndexData();
+        mesh_decl.indexCount = display_scene[i]->GetIndexCount();
+        mesh_decl.indexFormat = display_scene[i]->GetIndexType() == blast::INDEX_TYPE_UINT16 ? xatlas::IndexFormat::UInt16 : xatlas::IndexFormat::UInt32;
+        xatlas::AddMeshError ret = xatlas::AddMesh(atlas, mesh_decl);
+    }
+    xatlas::Generate(atlas);
+    xatlas::Destroy(atlas);
+
     for (uint32_t i = 0; i < display_scene.size(); ++i) {
         display_scene[i]->GenerateGPUResource(g_device);
         object_storages.push_back({});
