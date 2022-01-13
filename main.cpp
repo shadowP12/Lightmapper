@@ -51,6 +51,10 @@ blast::GfxPipeline* blit_pipeline = nullptr;
 blast::GfxShader* scene_vert_shader = nullptr;
 blast::GfxShader* scene_frag_shader = nullptr;
 blast::GfxPipeline* scene_pipeline = nullptr;
+blast::GfxShader* raster_vert_shader = nullptr;
+blast::GfxShader* raster_frag_shader = nullptr;
+blast::GfxPipeline* raster_line_pipeline = nullptr;
+blast::GfxPipeline* raster_triangle_pipeline = nullptr;
 blast::GfxBuffer* object_ub = nullptr;
 Model* quad_model = nullptr;
 
@@ -87,6 +91,11 @@ int main() {
         scene_vert_shader = shaders.first;
         scene_frag_shader = shaders.second;
     }
+    {
+        auto shaders = CompileShaderProgram(ProjectDir + "/Resources/Shaders/raster.vert", ProjectDir + "/Resources/Shaders/raster.frag");
+        raster_vert_shader = shaders.first;
+        raster_frag_shader = shaders.second;
+    }
 
     // 加载场景资源
     std::vector<ObjectUniforms> object_storages;
@@ -122,7 +131,6 @@ int main() {
         }
         display_scene[i]->ResetUV1Data(uv_data);
     }
-
 
     xatlas::Destroy(atlas);
 
@@ -264,6 +272,8 @@ int main() {
     g_device->DestroyShader(blit_frag_shader);
     g_device->DestroyShader(scene_vert_shader);
     g_device->DestroyShader(scene_frag_shader);
+    g_device->DestroyShader(raster_vert_shader);
+    g_device->DestroyShader(raster_frag_shader);
 
     // 销毁GPU Buffer
     g_device->DestroyBuffer(object_ub);
@@ -275,6 +285,13 @@ int main() {
 
     if (scene_pipeline) {
         g_device->DestroyPipeline(scene_pipeline);
+    }
+    if (raster_line_pipeline) {
+        g_device->DestroyPipeline(raster_line_pipeline);
+    }
+
+    if (raster_triangle_pipeline) {
+        g_device->DestroyPipeline(raster_triangle_pipeline);
     }
 
     g_device->DestroySwapChain(g_swapchain);
@@ -371,6 +388,29 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
         pipeline_desc.dss = &depth_stencil_state;
         pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_TRI_LIST;
         scene_pipeline = g_device->CreatePipeline(pipeline_desc);
+    }
+
+    // raster pipeline
+    {
+        if (raster_line_pipeline) {
+            g_device->DestroyPipeline(raster_line_pipeline);
+        }
+
+        if (raster_triangle_pipeline) {
+            g_device->DestroyPipeline(raster_triangle_pipeline);
+        }
+        blast::GfxPipelineDesc pipeline_desc;
+        pipeline_desc.sc = g_swapchain;
+        pipeline_desc.vs = raster_vert_shader;
+        pipeline_desc.fs = raster_frag_shader;
+        pipeline_desc.il = &input_layout;
+        pipeline_desc.bs = &blend_state;
+        pipeline_desc.rs = &rasterizer_state;
+        pipeline_desc.dss = &depth_stencil_state;
+        pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_LINE_LIST;
+        raster_line_pipeline = g_device->CreatePipeline(pipeline_desc);
+        pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_TRI_LIST;
+        raster_triangle_pipeline = g_device->CreatePipeline(pipeline_desc);
     }
 }
 
