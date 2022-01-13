@@ -40,7 +40,7 @@ void Model::GenerateGPUResource(blast::GfxDevice* device) {
     blast::GfxBufferDesc buffer_desc;
     buffer_desc.size = sizeof(Vertex) * vertex_count;
     buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
-    buffer_desc.res_usage = blast::RESOURCE_USAGE_VERTEX_BUFFER;
+    buffer_desc.res_usage = blast::RESOURCE_USAGE_VERTEX_BUFFER | blast::RESOURCE_USAGE_RW_BUFFER;
     vertex_buffer = device->CreateBuffer(buffer_desc);
     {
         device->UpdateBuffer(copy_cmd, vertex_buffer, vertex_data, sizeof(Vertex) * vertex_count);

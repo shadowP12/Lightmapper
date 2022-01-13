@@ -112,6 +112,18 @@ int main() {
         xatlas::AddMeshError ret = xatlas::AddMesh(atlas, mesh_decl);
     }
     xatlas::Generate(atlas);
+    for (uint32_t i = 0; i < atlas->meshCount; ++i) {
+        xatlas::Mesh& atlas_mesh = atlas->meshes[i];
+        uint8_t* uv_data = new uint8_t[sizeof(glm::vec2) * atlas_mesh.vertexCount];
+        float* uvs = (float*)uv_data;
+        for (uint32_t j = 0; j < atlas_mesh.vertexCount; ++j) {
+            uvs[j * 2] = atlas_mesh.vertexArray[j].uv[0] / atlas->width;
+            uvs[j * 2 + 1] = atlas_mesh.vertexArray[j].uv[1]/ atlas->height;
+        }
+        display_scene[i]->ResetUV1Data(uv_data);
+    }
+
+
     xatlas::Destroy(atlas);
 
     for (uint32_t i = 0; i < display_scene.size(); ++i) {
@@ -166,7 +178,7 @@ int main() {
         proj_matrix[1][1] *= -1;
 
         for (uint32_t i = 0; i < display_scene.size(); ++i) {
-            object_storages[i + 1].model_matrix = display_scene[i]->GetModelMatriax();
+            object_storages[i + 1].model_matrix = glm::mat4(1.0f);//display_scene[i]->GetModelMatriax();
             object_storages[i + 1].view_matrix = view_matrix;
             object_storages[i + 1].proj_matrix = proj_matrix;
         }

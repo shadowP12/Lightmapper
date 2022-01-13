@@ -182,6 +182,25 @@ std::vector<Model*> ImportScene(const std::string& file_path) {
             memcpy(index_data, indexData, indexCount * sizeof(uint32_t));
         }
 
+        // 模型矩阵作用于顶点数据
+        glm::mat4 model_matrix = GetWorldMatrix(cnode);
+        glm::mat3 normal_matrix = glm::transpose(glm::inverse(glm::mat3(model_matrix)));
+        float* positions = (float*)position_data;
+        float* normals = (float*)normal_data;
+        for (uint32_t j = 0; j < vertex_count; ++j) {
+            glm::vec4 pos = glm::vec4(positions[j*3], positions[j*3+1], positions[j*3+2], 1.0);
+            pos = model_matrix * pos;
+            pos /= pos.w;
+            positions[j*3] = pos.x;
+            positions[j*3+1] = pos.y;
+            positions[j*3+2] = pos.z;
+
+            glm::vec3 normal = normal_matrix * glm::vec3(normals[j*3], normals[j*3+1], normals[j*3+2]);
+            normals[j*3] = normal.x;
+            normals[j*3+1] = normal.y;
+            normals[j*3+2] = normal.z;
+        }
+
         model->SetPositionData(position_data);
         model->SetNormalData(normal_data);
         model->SetUV0Data(uv0_data);
