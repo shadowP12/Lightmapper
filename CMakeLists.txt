@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 14)
 
 add_definitions(-DPROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-add_executable(Lightmapper main.cpp Model.cpp Importer.cpp)
+add_executable(Lightmapper main.cpp Model.cpp LightMap.cpp Importer.cpp)
 
 # glfw
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/External/glfw EXCLUDE_FROM_ALL glfw.out)

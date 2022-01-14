@@ -45,6 +45,10 @@ static void MouseScrollCallback(GLFWwindow* window, double offset_x, double offs
 blast::ShaderCompiler* g_shader_compiler = nullptr;
 blast::GfxDevice* g_device = nullptr;
 blast::GfxSwapChain* g_swapchain = nullptr;
+blast::GfxTexture* position_tex = nullptr;
+blast::GfxTexture* normal_tex = nullptr;
+blast::GfxTexture* unocclude_tex = nullptr;
+blast::GfxRenderPass* raster_renderpass = nullptr;
 blast::GfxShader* blit_vert_shader = nullptr;
 blast::GfxShader* blit_frag_shader = nullptr;
 blast::GfxPipeline* blit_pipeline = nullptr;
@@ -57,6 +61,7 @@ blast::GfxPipeline* raster_line_pipeline = nullptr;
 blast::GfxPipeline* raster_triangle_pipeline = nullptr;
 blast::GfxBuffer* object_ub = nullptr;
 Model* quad_model = nullptr;
+bool is_baked = false;
 
 struct ObjectUniforms {
     glm::mat4 model_matrix;
@@ -74,6 +79,11 @@ struct Camera {
     float pitch = 0.0f;
     bool grabbing = false;
 } camera;
+
+struct LightmapParam {
+    uint32_t width;
+    uint32_t height;
+} lightmap_param;
 
 int main() {
     g_shader_compiler = new blast::VulkanShaderCompiler();
@@ -121,6 +131,8 @@ int main() {
         xatlas::AddMeshError ret = xatlas::AddMesh(atlas, mesh_decl);
     }
     xatlas::Generate(atlas);
+    lightmap_param.width = atlas->width;
+    lightmap_param.height = atlas->height;
     for (uint32_t i = 0; i < atlas->meshCount; ++i) {
         xatlas::Mesh& atlas_mesh = atlas->meshes[i];
         uint8_t* uv_data = new uint8_t[sizeof(glm::vec2) * atlas_mesh.vertexCount];
@@ -137,6 +149,25 @@ int main() {
     for (uint32_t i = 0; i < display_scene.size(); ++i) {
         display_scene[i]->GenerateGPUResource(g_device);
         object_storages.push_back({});
+    }
+
+    // 创建光栅化RenderPass
+    {
+        blast::GfxTextureDesc texture_desc;
+        texture_desc.width = lightmap_param.width;
+        texture_desc.height = lightmap_param.height;
+        texture_desc.format = blast::FORMAT_R32G32B32A32_FLOAT;
+        texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_RENDER_TARGET | blast::RESOURCE_USAGE_UNORDERED_ACCESS;
+        texture_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        position_tex = g_device->CreateTexture(texture_desc);
+        normal_tex = g_device->CreateTexture(texture_desc);
+        unocclude_tex = g_device->CreateTexture(texture_desc);
+
+        blast::GfxRenderPassDesc renderpass_desc = {};
+        renderpass_desc.attachments.push_back(blast::RenderPassAttachment::RenderTarget(position_tex, -1, blast::LOAD_CLEAR));
+        renderpass_desc.attachments.push_back(blast::RenderPassAttachment::RenderTarget(normal_tex, -1, blast::LOAD_CLEAR));
+        renderpass_desc.attachments.push_back(blast::RenderPassAttachment::RenderTarget(unocclude_tex, -1, blast::LOAD_CLEAR));
+        raster_renderpass = g_device->CreateRenderPass(renderpass_desc);
     }
 
     // 加载GPU Buffer
@@ -172,6 +203,12 @@ int main() {
         }
 
         blast::GfxCommandBuffer* cmd = g_device->RequestCommandBuffer(blast::QUEUE_GRAPHICS);
+
+        // 烘培
+        if (!is_baked) {
+            is_baked = true;
+            
+        }
 
         // 更新Object Uniform
         object_storages[0].model_matrix = glm::toMat4(glm::quat(glm::vec3(glm::radians(-90.0f), 0.0f, 0.0f)));
@@ -274,6 +311,12 @@ int main() {
     g_device->DestroyShader(scene_frag_shader);
     g_device->DestroyShader(raster_vert_shader);
     g_device->DestroyShader(raster_frag_shader);
+
+    // 清除光栅化RenderPass资源
+    g_device->DestroyTexture(position_tex);
+    g_device->DestroyTexture(normal_tex);
+    g_device->DestroyTexture(unocclude_tex);
+    g_device->DestroyRenderPass(raster_renderpass);
 
     // 销毁GPU Buffer
     g_device->DestroyBuffer(object_ub);
@@ -400,7 +443,7 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
             g_device->DestroyPipeline(raster_triangle_pipeline);
         }
         blast::GfxPipelineDesc pipeline_desc;
-        pipeline_desc.sc = g_swapchain;
+        pipeline_desc.rp = raster_renderpass;
         pipeline_desc.vs = raster_vert_shader;
         pipeline_desc.fs = raster_frag_shader;
         pipeline_desc.il = &input_layout;
