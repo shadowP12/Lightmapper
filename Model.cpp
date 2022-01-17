@@ -46,7 +46,7 @@ void Model::GenerateGPUResource(blast::GfxDevice* device) {
         device->UpdateBuffer(copy_cmd, vertex_buffer, vertex_data, sizeof(Vertex) * vertex_count);
         blast::GfxBufferBarrier barrier;
         barrier.buffer = vertex_buffer;
-        barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+        barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
         device->SetBarrier(copy_cmd, 1, &barrier, 0, nullptr);
     }
 
@@ -62,7 +62,7 @@ void Model::GenerateGPUResource(blast::GfxDevice* device) {
         device->UpdateBuffer(copy_cmd, index_buffer, index_data, buffer_desc.size);
         blast::GfxBufferBarrier barrier;
         barrier.buffer = index_buffer;
-        barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+        barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
         device->SetBarrier(copy_cmd, 1, &barrier, 0, nullptr);
     }
 

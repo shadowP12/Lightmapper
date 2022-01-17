@@ -207,7 +207,25 @@ int main() {
         // 烘培
         if (!is_baked) {
             is_baked = true;
-            
+
+            blast::GfxTextureBarrier texture_barriers[3];
+            texture_barriers[0].texture = position_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_RENDERTARGET;
+            texture_barriers[1].texture = normal_tex;
+            texture_barriers[1].new_state = blast::RESOURCE_STATE_RENDERTARGET;
+            texture_barriers[2].texture = unocclude_tex;
+            texture_barriers[2].new_state = blast::RESOURCE_STATE_RENDERTARGET;
+            g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
+
+
+
+            texture_barriers[0].texture = position_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            texture_barriers[1].texture = normal_tex;
+            texture_barriers[1].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            texture_barriers[2].texture = unocclude_tex;
+            texture_barriers[2].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
         }
 
         // 更新Object Uniform
