@@ -179,6 +179,11 @@ int main() {
         object_ub = g_device->CreateBuffer(buffer_desc);
     }
 
+    // Acceleration Structures
+
+
+
+
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(800, 600, "Lightmapper", nullptr, nullptr);
@@ -217,7 +222,8 @@ int main() {
             texture_barriers[2].new_state = blast::RESOURCE_STATE_RENDERTARGET;
             g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
 
-
+            g_device->RenderPassBegin(cmd, raster_renderpass);
+            g_device->RenderPassEnd(cmd);
 
             texture_barriers[0].texture = position_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
