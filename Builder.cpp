@@ -194,8 +194,6 @@ static bool TriangleBoxOverlap(const glm::vec3 &boxcenter, const glm::vec3 boxha
     return PlaneBoxOverlap(normal, d, boxhalfsize);
 }
 
-#define MAX_GRID_SIZE 128
-
 void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_offset, const AABB& bounds, const glm::vec3 points[3], uint32_t triangle_index, std::vector<TriangleSort>& triangles) {
     int half_size = grid_size / 2;
 
@@ -235,26 +233,26 @@ void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_off
     }
 }
 
-AccelerationStructures* BuildAccelerationStructures(std::vector<Model>& models) {
+AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models) {
     AccelerationStructures* as = new AccelerationStructures();
 
     for (int i = 0; i < models.size(); i++) {
-        std::unordered_map<Edge, EdgeUV, EdgeHash> edges;
+        std::unordered_map<Edge, EdgeUV, MurmurHash<Edge>, EdgeEq> edges;
 
-        glm::vec3* position_data = (glm::vec3*)models[i].GetPositionData();
-        glm::vec3* normal_data = (glm::vec3*)models[i].GetNormalData();
-        glm::vec2* uv0_data = (glm::vec2*)models[i].GetUV0Data();
-        glm::vec2* uv1_data = (glm::vec2*)models[i].GetUV1Data();
-        uint16_t* index16_data = (uint16_t*)models[i].GetIndexData();
-        uint32_t* index32_data = (uint32_t*)models[i].GetIndexData();
+        glm::vec3* position_data = (glm::vec3*)models[i]->GetPositionData();
+        glm::vec3* normal_data = (glm::vec3*)models[i]->GetNormalData();
+        glm::vec2* uv0_data = (glm::vec2*)models[i]->GetUV0Data();
+        glm::vec2* uv1_data = (glm::vec2*)models[i]->GetUV1Data();
+        uint16_t* index16_data = (uint16_t*)models[i]->GetIndexData();
+        uint32_t* index32_data = (uint32_t*)models[i]->GetIndexData();
 
         if (i == 0) {
-            as->bounds.position = ((glm::vec3*)models[i].GetPositionData())[0];
+            as->bounds.position = ((glm::vec3*)models[i]->GetPositionData())[0];
         }
 
-        for (int j = 0; j < models[i].GetIndexCount(); j+=3) {
+        for (int j = 0; j < models[i]->GetIndexCount(); j+=3) {
             uint32_t indices[3];
-            if (models[i].GetIndexType() == blast::INDEX_TYPE_UINT16) {
+            if (models[i]->GetIndexType() == blast::INDEX_TYPE_UINT16) {
                 indices[0] = index16_data[j];
                 indices[1] = index16_data[j+1];
                 indices[2] = index16_data[j+2];
@@ -363,7 +361,24 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model>& models) 
     // 排序
     std::sort(triangle_sort.begin(), triangle_sort.end());
 
+    as->triangle_indices.resize(triangle_sort.size());
+    as->grid_indices.resize(MAX_GRID_SIZE * MAX_GRID_SIZE * MAX_GRID_SIZE * 2);
+    memset(as->grid_indices.data(), 0, as->grid_indices.size() * sizeof(uint32_t));
 
+    uint32_t* triangle_indices_data = as->triangle_indices.data();
+    uint32_t* grid_indices_data = as->grid_indices.data();
+    uint32_t last_cell = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < triangle_sort.size(); i++) {
+        uint32_t cell = triangle_sort[i].cell_index;
+        if (cell != last_cell) {
+            // 第二位记录同个cell第一个的三角形索引
+            grid_indices_data[cell*2+1] = i;
+        }
+        triangle_indices_data[i] = triangle_sort[i].triangle_index;
+        // 第一位记录同个cell内的三角形数量
+        grid_indices_data[cell*2]++;
+        last_cell = cell;
+    }
 
     return as;
 }

@@ -1,6 +1,7 @@
 #include "LightMapperDefine.h"
 #include "Importer.h"
 #include "Model.h"
+#include "Builder.h"
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
@@ -180,9 +181,7 @@ int main() {
     }
 
     // Acceleration Structures
-
-
-
+    AccelerationStructures* as = BuildAccelerationStructures(display_scene);
 
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -344,6 +343,9 @@ int main() {
 
     // 销毁GPU Buffer
     g_device->DestroyBuffer(object_ub);
+
+    // Acceleration Structures
+    SAFE_DELETE(as)
 
     // 清空管线资源
     if (blit_pipeline) {

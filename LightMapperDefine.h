@@ -17,6 +17,37 @@
         x = nullptr; \
     }
 
+#define MAX_GRID_SIZE 128
+
+inline uint32_t murmur3(const uint32_t* key, size_t wordCount, uint32_t seed) noexcept {
+    uint32_t h = seed;
+    size_t i = wordCount;
+    do {
+        uint32_t k = *key++;
+        k *= 0xcc9e2d51u;
+        k = (k << 15u) | (k >> 17u);
+        k *= 0x1b873593u;
+        h ^= k;
+        h = (h << 13u) | (h >> 19u);
+        h = (h * 5u) + 0xe6546b64u;
+    } while (--i);
+    h ^= wordCount;
+    h ^= h >> 16u;
+    h *= 0x85ebca6bu;
+    h ^= h >> 13u;
+    h *= 0xc2b2ae35u;
+    h ^= h >> 16u;
+    return h;
+}
+
+template<typename T>
+struct MurmurHash {
+    uint32_t operator()(const T& key) const noexcept {
+        static_assert(0 == (sizeof(key) & 3u), "Hashing requires a size that is a multiple of 4.");
+        return murmur3((const uint32_t*) &key, sizeof(key) / 4, 0);
+    }
+};
+
 // 目前只支持方向光
 struct Light {
     glm::vec4 position;
@@ -70,7 +101,7 @@ struct EdgeUV {
     }
 };
 
-struct EdgeHash {
+struct EdgeEq  {
     bool operator()(const Edge& edge_a, const Edge& edge_b) const {
         if (edge_a.a.x != edge_b.a.x) return false;
         if (edge_a.a.y != edge_b.a.y) return false;
