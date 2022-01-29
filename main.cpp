@@ -61,6 +61,13 @@ blast::GfxShader* raster_frag_shader = nullptr;
 blast::GfxPipeline* raster_line_pipeline = nullptr;
 blast::GfxPipeline* raster_triangle_pipeline = nullptr;
 blast::GfxBuffer* object_ub = nullptr;
+// Acceleration Structures Begin
+blast::GfxBuffer* vertex_buffer = nullptr;
+blast::GfxBuffer* triangle_buffer = nullptr;
+blast::GfxBuffer* seam_buffer = nullptr;
+blast::GfxBuffer* triangle_index_buffer = nullptr;
+blast::GfxTexture* grid_tex = nullptr;
+// Acceleration Structures End
 Model* quad_model = nullptr;
 bool is_baked = false;
 
@@ -139,8 +146,14 @@ int main() {
         uint8_t* uv_data = new uint8_t[sizeof(glm::vec2) * atlas_mesh.vertexCount];
         float* uvs = (float*)uv_data;
         for (uint32_t j = 0; j < atlas_mesh.vertexCount; ++j) {
-            uvs[j * 2] = atlas_mesh.vertexArray[j].uv[0] / atlas->width;
-            uvs[j * 2 + 1] = atlas_mesh.vertexArray[j].uv[1]/ atlas->height;
+            uint32_t xref = atlas_mesh.vertexArray[j].xref;
+            uvs[xref * 2] = atlas_mesh.vertexArray[j].uv[0] / atlas->width;
+            uvs[xref * 2 + 1] = atlas_mesh.vertexArray[j].uv[1] / atlas->height;
+            //printf("%d\n", atlas_mesh.vertexArray[j].xref);
+        }
+        for (int j = 0; j < display_scene[i]->GetVertexCount(); ++j) {
+//            printf("x  %f\n", uvs[j*2]);
+//            printf("y  %f\n", uvs[j*2+1]);
         }
         display_scene[i]->ResetUV1Data(uv_data);
     }
@@ -182,6 +195,71 @@ int main() {
 
     // Acceleration Structures
     AccelerationStructures* as = BuildAccelerationStructures(display_scene);
+    {
+        blast::GfxCommandBuffer* copy_cmd = g_device->RequestCommandBuffer(blast::QUEUE_COPY);
+        blast::GfxBufferBarrier buffer_barriers[4] = {};
+        blast::GfxTextureBarrier texture_barrier = {};
+
+        blast::GfxTextureDesc texture_desc;
+        texture_desc.width = MAX_GRID_SIZE;
+        texture_desc.height = MAX_GRID_SIZE;
+        texture_desc.depth = MAX_GRID_SIZE;
+        texture_desc.format = blast::FORMAT_R32G32_UINT;
+        texture_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_UNORDERED_ACCESS;
+        grid_tex = g_device->CreateTexture(texture_desc);
+
+        texture_barrier.texture = grid_tex;
+        texture_barrier.new_state = blast::RESOURCE_STATE_COPY_DEST;
+        g_device->SetBarrier(copy_cmd, 0, nullptr, 1, &texture_barrier);
+
+        g_device->UpdateTexture(copy_cmd, grid_tex, as->grid_indices.data());
+
+        blast::GfxBufferDesc buffer_desc = {};
+        buffer_desc.size = sizeof(Vertex) * as->vertices.size();
+        buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        buffer_desc.res_usage = blast::RESOURCE_USAGE_RW_BUFFER;
+        vertex_buffer = g_device->CreateBuffer(buffer_desc);
+        g_device->UpdateBuffer(copy_cmd, vertex_buffer, as->vertices.data(), sizeof(Vertex) * as->vertices.size());
+
+        buffer_desc.size = sizeof(Triangle) * as->triangles.size();
+        buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        buffer_desc.res_usage = blast::RESOURCE_USAGE_RW_BUFFER;
+        triangle_buffer = g_device->CreateBuffer(buffer_desc);
+        g_device->UpdateBuffer(copy_cmd, triangle_buffer, as->triangles.data(), sizeof(Triangle) * as->triangles.size());
+
+        if (as->seams.size() != 0) {
+            buffer_desc.size = sizeof(Seam) * as->seams.size();
+            buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+            buffer_desc.res_usage = blast::RESOURCE_USAGE_RW_BUFFER;
+            seam_buffer = g_device->CreateBuffer(buffer_desc);
+            g_device->UpdateBuffer(copy_cmd, seam_buffer, as->seams.data(), sizeof(Seam) * as->seams.size());
+        } else {
+            buffer_desc.size = sizeof(Seam);
+            buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+            buffer_desc.res_usage = blast::RESOURCE_USAGE_RW_BUFFER;
+            seam_buffer = g_device->CreateBuffer(buffer_desc);
+        }
+
+        buffer_desc.size = sizeof(uint32_t) * as->triangle_indices.size();
+        buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        buffer_desc.res_usage = blast::RESOURCE_USAGE_RW_BUFFER;
+        triangle_index_buffer = g_device->CreateBuffer(buffer_desc);
+        g_device->UpdateBuffer(copy_cmd, triangle_index_buffer, as->triangle_indices.data(), sizeof(uint32_t) * as->triangle_indices.size());
+
+        buffer_barriers[0].buffer = vertex_buffer;
+        buffer_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+        buffer_barriers[1].buffer = triangle_buffer;
+        buffer_barriers[1].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+        buffer_barriers[2].buffer = seam_buffer;
+        buffer_barriers[2].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+        buffer_barriers[3].buffer = triangle_index_buffer;
+        buffer_barriers[3].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+        texture_barrier.texture = grid_tex;
+        texture_barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+
+        g_device->SetBarrier(copy_cmd, 4, buffer_barriers, 1, &texture_barrier);
+    }
 
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -222,6 +300,29 @@ int main() {
             g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
 
             g_device->RenderPassBegin(cmd, raster_renderpass);
+
+            blast::Viewport viewport;
+            viewport.x = 0;
+            viewport.y = 0;
+            viewport.w = lightmap_param.width;
+            viewport.h = lightmap_param.height;
+            g_device->BindViewports(cmd, 1, &viewport);
+
+            blast::Rect rect;
+            rect.left = 0;
+            rect.top = 0;
+            rect.right = lightmap_param.width;
+            rect.bottom = lightmap_param.height;
+            g_device->BindScissorRects(cmd, 1, &rect);
+
+            g_device->BindPipeline(cmd, raster_triangle_pipeline);
+
+            g_device->BindUAV(cmd, vertex_buffer, 0);
+
+            g_device->BindUAV(cmd, triangle_buffer, 1);
+
+            g_device->Draw(cmd, as->triangles.size() * 3, 0);
+
             g_device->RenderPassEnd(cmd);
 
             texture_barriers[0].texture = position_tex;
@@ -345,7 +446,12 @@ int main() {
     g_device->DestroyBuffer(object_ub);
 
     // Acceleration Structures
-    SAFE_DELETE(as)
+    SAFE_DELETE(as);
+    g_device->DestroyBuffer(seam_buffer);
+    g_device->DestroyBuffer(vertex_buffer);
+    g_device->DestroyBuffer(triangle_buffer);
+    g_device->DestroyBuffer(triangle_index_buffer);
+    g_device->DestroyTexture(grid_tex);
 
     // 清空管线资源
     if (blit_pipeline) {
@@ -384,28 +490,28 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
     input_element.format = blast::FORMAT_R32G32B32_FLOAT;
     input_element.binding = 0;
     input_element.location = 0;
-    input_element.offset = offsetof(Vertex, position);
+    input_element.offset = offsetof(MeshVertex, position);
     input_layout.elements.push_back(input_element);
 
     input_element.semantic = blast::SEMANTIC_NORMAL;
     input_element.format = blast::FORMAT_R32G32B32_FLOAT;
     input_element.binding = 0;
     input_element.location = 1;
-    input_element.offset = offsetof(Vertex, normal);
+    input_element.offset = offsetof(MeshVertex, normal);
     input_layout.elements.push_back(input_element);
 
     input_element.semantic = blast::SEMANTIC_TEXCOORD0;
     input_element.format = blast::FORMAT_R32G32_FLOAT;
     input_element.binding = 0;
     input_element.location = 2;
-    input_element.offset = offsetof(Vertex, uv0);
+    input_element.offset = offsetof(MeshVertex, uv0);
     input_layout.elements.push_back(input_element);
 
     input_element.semantic = blast::SEMANTIC_TEXCOORD1;
     input_element.format = blast::FORMAT_R32G32_FLOAT;
     input_element.binding = 0;
     input_element.location = 3;
-    input_element.offset = offsetof(Vertex, uv1);
+    input_element.offset = offsetof(MeshVertex, uv1);
     input_layout.elements.push_back(input_element);
 
     blast::GfxBlendState blend_state = {};
@@ -468,11 +574,13 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
         if (raster_triangle_pipeline) {
             g_device->DestroyPipeline(raster_triangle_pipeline);
         }
+
+        blast::GfxInputLayout null_input_layout = {};
         blast::GfxPipelineDesc pipeline_desc;
         pipeline_desc.rp = raster_renderpass;
         pipeline_desc.vs = raster_vert_shader;
         pipeline_desc.fs = raster_frag_shader;
-        pipeline_desc.il = &input_layout;
+        pipeline_desc.il = &null_input_layout;
         pipeline_desc.bs = &blend_state;
         pipeline_desc.rs = &rasterizer_state;
         pipeline_desc.dss = &depth_stencil_state;

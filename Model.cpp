@@ -30,20 +30,20 @@ void Model::ResetUV1Data(uint8_t* uv1_data) {
 }
 
 void Model::GenerateGPUResource(blast::GfxDevice* device) {
-    uint8_t* vertex_data = new uint8_t[vertex_count * sizeof(Vertex)];
-    CombindVertexData(vertex_data, position_data, vertex_count, sizeof(glm::vec3), offsetof(Vertex, position), sizeof(Vertex), sizeof(glm::vec3) * vertex_count);
-    CombindVertexData(vertex_data, normal_data, vertex_count, sizeof(glm::vec3), offsetof(Vertex, normal), sizeof(Vertex), sizeof(glm::vec3) * vertex_count);
-    CombindVertexData(vertex_data, uv0_data, vertex_count, sizeof(glm::vec2), offsetof(Vertex, uv0), sizeof(Vertex), sizeof(glm::vec2) * vertex_count);
-    CombindVertexData(vertex_data, uv1_data, vertex_count, sizeof(glm::vec2), offsetof(Vertex, uv1), sizeof(Vertex), sizeof(glm::vec2) * vertex_count);
+    uint8_t* vertex_data = new uint8_t[vertex_count * sizeof(MeshVertex)];
+    CombindVertexData(vertex_data, position_data, vertex_count, sizeof(glm::vec3), offsetof(MeshVertex, position), sizeof(MeshVertex), sizeof(glm::vec3) * vertex_count);
+    CombindVertexData(vertex_data, normal_data, vertex_count, sizeof(glm::vec3), offsetof(MeshVertex, normal), sizeof(MeshVertex), sizeof(glm::vec3) * vertex_count);
+    CombindVertexData(vertex_data, uv0_data, vertex_count, sizeof(glm::vec2), offsetof(MeshVertex, uv0), sizeof(MeshVertex), sizeof(glm::vec2) * vertex_count);
+    CombindVertexData(vertex_data, uv1_data, vertex_count, sizeof(glm::vec2), offsetof(MeshVertex, uv1), sizeof(MeshVertex), sizeof(glm::vec2) * vertex_count);
 
     blast::GfxCommandBuffer* copy_cmd = device->RequestCommandBuffer(blast::QUEUE_COPY);
     blast::GfxBufferDesc buffer_desc;
-    buffer_desc.size = sizeof(Vertex) * vertex_count;
+    buffer_desc.size = sizeof(MeshVertex) * vertex_count;
     buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
     buffer_desc.res_usage = blast::RESOURCE_USAGE_VERTEX_BUFFER | blast::RESOURCE_USAGE_RW_BUFFER;
     vertex_buffer = device->CreateBuffer(buffer_desc);
     {
-        device->UpdateBuffer(copy_cmd, vertex_buffer, vertex_data, sizeof(Vertex) * vertex_count);
+        device->UpdateBuffer(copy_cmd, vertex_buffer, vertex_data, sizeof(MeshVertex) * vertex_count);
         blast::GfxBufferBarrier barrier;
         barrier.buffer = vertex_buffer;
         barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;

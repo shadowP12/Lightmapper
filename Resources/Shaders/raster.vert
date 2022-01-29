@@ -1,18 +1,40 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(location = 0) in vec3 a_position;
-layout(location = 1) in vec3 a_normal;
-layout(location = 2) in vec2 a_uv0;
-layout(location = 3) in vec2 a_uv1;
+struct Vertex {
+    vec4 position;
+    vec4 normal;
+    vec2 uv0;
+    vec2 uv1;
+};
 
-layout(std140, set = 0, binding = 0) uniform ObjectUniforms {
-    mat4 model_matrix;
-    mat4 view_matrix;
-    mat4 proj_matrix;
-} object_uniforms;
+layout(set = 0, binding = 2000, std430) restrict readonly buffer Vertices {
+    Vertex data[];
+} vertices;
+
+struct Triangle {
+    uvec4 indices;
+    vec4 min_bounds;
+    vec4 max_bounds;
+};
+
+layout(set = 0, binding = 2001, std430) restrict readonly buffer Triangles {
+    Triangle data[];
+} triangles;
 
 void main() 
 {
-    gl_Position = object_uniforms.proj_matrix * object_uniforms.view_matrix * object_uniforms.model_matrix * vec4(a_position, 1.0);
+    uint triangle_idx = gl_VertexIndex / 3;
+    uint triangle_subidx = gl_VertexIndex % 3;
+    uvec4 vertex_indices = triangles.data[triangle_idx].indices;
+    uint vertex_idx;
+    if (triangle_subidx == 0) {
+        vertex_idx = vertex_indices.x;
+    } else if (triangle_subidx == 1) {
+        vertex_idx = vertex_indices.y;
+    } else {
+        vertex_idx = vertex_indices.z;
+    }
+
+    gl_Position = vec4((vertices.data[vertex_idx].uv1) * 2.0 - 1.0, 0.0001, 1.0);
 }

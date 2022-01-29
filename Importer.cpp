@@ -190,7 +190,8 @@ std::vector<Model*> ImportScene(const std::string& file_path) {
         for (uint32_t j = 0; j < vertex_count; ++j) {
             glm::vec4 pos = glm::vec4(positions[j*3], positions[j*3+1], positions[j*3+2], 1.0);
             pos = model_matrix * pos;
-            pos /= pos.w;
+
+            //pos /= pos.w;
             positions[j*3] = pos.x;
             positions[j*3+1] = pos.y;
             positions[j*3+2] = pos.z;

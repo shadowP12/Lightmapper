@@ -55,6 +55,13 @@ struct Light {
 };
 
 struct Vertex {
+    glm::vec4 position;
+    glm::vec4 normal;
+    glm::vec2 uv0;
+    glm::vec2 uv1;
+};
+
+struct MeshVertex {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 uv0;
@@ -116,22 +123,12 @@ struct EdgeEq  {
 struct Seam {
     glm::ivec2 a;
     glm::ivec2 b;
-    uint32_t slice;
-    bool operator<(const Seam &p_seam) const {
-        return slice < p_seam.slice;
-    }
 };
 
 struct Triangle {
-    uint32_t indices[3] = {};
-    uint32_t slice = 0;
-    float min_bounds[3] = {};
-    float pad0 = 0.0;
-    float max_bounds[3] = {};
-    float pad1 = 0.0;
-    bool operator<(const Triangle &p_triangle) const {
-        return slice < p_triangle.slice;
-    }
+    uint32_t indices[4] = {};
+    float min_bounds[4] = {};
+    float max_bounds[4] = {};
 };
 
 struct TriangleSort {

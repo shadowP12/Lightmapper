@@ -237,12 +237,36 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
     AccelerationStructures* as = new AccelerationStructures();
 
     for (int i = 0; i < models.size(); i++) {
-        std::unordered_map<Edge, EdgeUV, MurmurHash<Edge>, EdgeEq> edges;
-
         glm::vec3* position_data = (glm::vec3*)models[i]->GetPositionData();
         glm::vec3* normal_data = (glm::vec3*)models[i]->GetNormalData();
         glm::vec2* uv0_data = (glm::vec2*)models[i]->GetUV0Data();
         glm::vec2* uv1_data = (glm::vec2*)models[i]->GetUV1Data();
+
+        if (i == 0) {
+            as->bounds.position = ((glm::vec3*)models[i]->GetPositionData())[0];
+        }
+
+        for (int j = 0; j < models[i]->GetVertexCount(); ++j) {
+            as->bounds.Expand(position_data[j]);
+
+            Vertex v;
+            v.position.x = position_data[j].x;
+            v.position.y = position_data[j].y;
+            v.position.z = position_data[j].z;
+            v.normal.x = normal_data[j].x;
+            v.normal.y = normal_data[j].y;
+            v.normal.z = normal_data[j].z;
+            v.uv0.x = uv0_data[j].x;
+            v.uv0.y = uv0_data[j].y;
+            v.uv1.x = uv1_data[j].x;
+            v.uv1.y = uv1_data[j].y;
+            as->vertices.push_back(v);
+        }
+    }
+
+    int vertex_offset = 0;
+    for (int i = 0; i < models.size(); i++) {
+        std::unordered_map<Edge, EdgeUV, MurmurHash<Edge>, EdgeEq> edges;
         uint16_t* index16_data = (uint16_t*)models[i]->GetIndexData();
         uint32_t* index32_data = (uint32_t*)models[i]->GetIndexData();
 
@@ -253,36 +277,23 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
         for (int j = 0; j < models[i]->GetIndexCount(); j+=3) {
             uint32_t indices[3];
             if (models[i]->GetIndexType() == blast::INDEX_TYPE_UINT16) {
-                indices[0] = index16_data[j];
-                indices[1] = index16_data[j+1];
-                indices[2] = index16_data[j+2];
+                indices[0] = index16_data[j] + vertex_offset;
+                indices[1] = index16_data[j+1] + vertex_offset;
+                indices[2] = index16_data[j+2] + vertex_offset;
             } else {
-                indices[0] = index32_data[j];
-                indices[1] = index32_data[j+1];
-                indices[2] = index32_data[j+2];
+                indices[0] = index32_data[j] + vertex_offset;
+                indices[1] = index32_data[j+1] + vertex_offset;
+                indices[2] = index32_data[j+2] + vertex_offset;
             }
 
-            glm::vec3 vtxs[3] = { position_data[indices[0]], position_data[indices[1]], position_data[indices[2]] };
-            glm::vec3 normals[3] = { normal_data[indices[0]], position_data[indices[1]], position_data[indices[2]] };
-            glm::vec2 uvs[3] = { uv0_data[indices[0]], uv0_data[indices[1]], uv0_data[indices[2]] };
-            glm::vec2 atlas_uvs[3] = { uv1_data[indices[0]], uv1_data[indices[1]], uv1_data[indices[2]] };
+            glm::vec3 vtxs[3] = { as->vertices[indices[0]].position, as->vertices[indices[1]].position, as->vertices[indices[2]].position };
+            glm::vec3 normals[3] = { as->vertices[indices[0]].normal, as->vertices[indices[1]].normal, as->vertices[indices[2]].normal };
+            glm::vec2 uvs[3] = { as->vertices[indices[0]].uv0, as->vertices[indices[1]].uv0, as->vertices[indices[2]].uv0 };
+            glm::vec2 atlas_uvs[3] = { as->vertices[indices[0]].uv1, as->vertices[indices[1]].uv1, as->vertices[indices[2]].uv1 };
 
             AABB taabb;
             Triangle t;
             for (int k = 0; k < 3; k++) {
-                as->bounds.Expand(vtxs[k]);
-
-                Vertex v;
-                v.position[0] = vtxs[k].x;
-                v.position[1] = vtxs[k].y;
-                v.position[2] = vtxs[k].z;
-                v.uv0[0] = uvs[k].x;
-                v.uv1[1] = atlas_uvs[k].y;
-                v.normal[0] = normals[k].x;
-                v.normal[1] = normals[k].y;
-                v.normal[2] = normals[k].z;
-                as->vertices.push_back(v);
-
                 t.indices[k] = indices[k];
                 if (k == 0) {
                     taabb.position = vtxs[k];
@@ -322,7 +333,6 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
                     Seam seam;
                     seam.a = edge_indices;
                     seam.b = euv2->indices;
-                    seam.slice = 0;
                     as->seams.push_back(seam);
                     euv2->seam_found = true;
                 }
@@ -334,11 +344,10 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
             t.max_bounds[0] = taabb.position.x + glm::max(taabb.size.x, 0.0001f);
             t.max_bounds[1] = taabb.position.y + glm::max(taabb.size.y, 0.0001f);
             t.max_bounds[2] = taabb.position.z + glm::max(taabb.size.z, 0.0001f);
-            // 不支持多lod烘培
-            t.slice = 0;
-            t.pad0 = t.pad1 = 0;
             as->triangles.push_back(t);
         }
+
+        vertex_offset += models[i]->GetVertexCount();
     }
 
     // 为了避免数值错误稍微扩充下包围盒
