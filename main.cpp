@@ -61,6 +61,7 @@ blast::GfxShader* raster_frag_shader = nullptr;
 blast::GfxPipeline* raster_line_pipeline = nullptr;
 blast::GfxPipeline* raster_triangle_pipeline = nullptr;
 blast::GfxBuffer* object_ub = nullptr;
+
 // Acceleration Structures Begin
 blast::GfxBuffer* vertex_buffer = nullptr;
 blast::GfxBuffer* triangle_buffer = nullptr;
@@ -68,6 +69,13 @@ blast::GfxBuffer* seam_buffer = nullptr;
 blast::GfxBuffer* triangle_index_buffer = nullptr;
 blast::GfxTexture* grid_tex = nullptr;
 // Acceleration Structures End
+
+// LightMap Begin
+blast::GfxBuffer* light_ub = nullptr;
+blast::GfxTexture* source_light_tex = nullptr;
+blast::GfxTexture* dest_light_tex = nullptr;
+// LightMap End
+
 Model* quad_model = nullptr;
 bool is_baked = false;
 
@@ -92,6 +100,19 @@ struct LightmapParam {
     uint32_t width;
     uint32_t height;
 } lightmap_param;
+
+struct BakeParam {
+    glm::vec4 bound_size;
+    glm::vec4 to_cell_offset;
+    glm::vec4 to_cell_size;
+    glm::ivec2 atlas_size;
+    float bias;
+    uint32_t ray_count;
+    uint32_t ray_to;
+    uint32_t ray_from;
+    uint32_t light_count;
+    uint32_t grid_size;
+} bake_param;
 
 int main() {
     g_shader_compiler = new blast::VulkanShaderCompiler();
@@ -194,9 +215,9 @@ int main() {
     }
 
     // Acceleration Structures
+    blast::GfxCommandBuffer* copy_cmd = g_device->RequestCommandBuffer(blast::QUEUE_COPY);
     AccelerationStructures* as = BuildAccelerationStructures(display_scene);
     {
-        blast::GfxCommandBuffer* copy_cmd = g_device->RequestCommandBuffer(blast::QUEUE_COPY);
         blast::GfxBufferBarrier buffer_barriers[4] = {};
         blast::GfxTextureBarrier texture_barrier = {};
 
@@ -261,6 +282,37 @@ int main() {
         g_device->SetBarrier(copy_cmd, 4, buffer_barriers, 1, &texture_barrier);
     }
 
+    // LightMap
+    std::vector<Light> lights;
+    {
+        Light dir_lit;
+        dir_lit.position_type = glm::vec4(0.0f, 100.0f, 0.0f, 0.0f);
+        dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
+        dir_lit.color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+        lights.push_back(dir_lit);
+
+        blast::GfxBufferDesc buffer_desc = {};
+        buffer_desc.size = sizeof(Light) * lights.size();
+        buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        buffer_desc.res_usage = blast::RESOURCE_USAGE_UNIFORM_BUFFER;
+        light_ub = g_device->CreateBuffer(buffer_desc);
+        g_device->UpdateBuffer(copy_cmd, light_ub, lights.data(), sizeof(Light) * lights.size());
+
+        blast::GfxBufferBarrier buffer_barrier = {};
+        buffer_barrier.buffer = light_ub;
+        buffer_barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+        g_device->SetBarrier(copy_cmd, 1, &buffer_barrier, 0, nullptr);
+
+        blast::GfxTextureDesc texture_desc;
+        texture_desc.width = lightmap_param.width;
+        texture_desc.height = lightmap_param.height;
+        texture_desc.format = blast::FORMAT_R32G32B32A32_FLOAT;
+        texture_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_UNORDERED_ACCESS;
+        source_light_tex = g_device->CreateTexture(texture_desc);
+        dest_light_tex = g_device->CreateTexture(texture_desc);
+    }
+
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(800, 600, "Lightmapper", nullptr, nullptr);
@@ -323,6 +375,14 @@ int main() {
 
             g_device->Draw(cmd, as->triangles.size() * 3, 0);
 
+            g_device->BindPipeline(cmd, raster_line_pipeline);
+
+            g_device->BindUAV(cmd, vertex_buffer, 0);
+
+            g_device->BindUAV(cmd, triangle_buffer, 1);
+
+            g_device->Draw(cmd, as->triangles.size() * 3, 0);
+
             g_device->RenderPassEnd(cmd);
 
             texture_barriers[0].texture = position_tex;
@@ -332,6 +392,17 @@ int main() {
             texture_barriers[2].texture = unocclude_tex;
             texture_barriers[2].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
             g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
+
+            bake_param.atlas_size = glm::ivec2(lightmap_param.width, lightmap_param.height);
+            bake_param.grid_size = MAX_GRID_SIZE;
+            bake_param.bias = 0.0f;
+            bake_param.light_count = lights.size();
+            bake_param.bound_size = glm::vec4(as->bounds.size, 0.0f);
+            bake_param.to_cell_offset = glm::vec4(as->bounds.position, 0.0f);
+            bake_param.to_cell_size.x = (1.0f / as->bounds.size.x) * float(MAX_GRID_SIZE);
+            bake_param.to_cell_size.y = (1.0f / as->bounds.size.y) * float(MAX_GRID_SIZE);
+            bake_param.to_cell_size.z = (1.0f / as->bounds.size.y) * float(MAX_GRID_SIZE);
+
         }
 
         // 更新Object Uniform
@@ -452,6 +523,11 @@ int main() {
     g_device->DestroyBuffer(triangle_buffer);
     g_device->DestroyBuffer(triangle_index_buffer);
     g_device->DestroyTexture(grid_tex);
+
+    // LightMap
+    g_device->DestroyBuffer(light_ub);
+    g_device->DestroyTexture(source_light_tex);
+    g_device->DestroyTexture(dest_light_tex);
 
     // 清空管线资源
     if (blit_pipeline) {

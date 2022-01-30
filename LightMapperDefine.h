@@ -48,10 +48,14 @@ struct MurmurHash {
     }
 };
 
-// 目前只支持方向光
 struct Light {
-    glm::vec4 position;
-    glm::vec4 direction;
+    glm::vec4 position_type;
+    glm::vec4 direction_energy;
+    glm::vec4 color;
+    float range;
+    float attenuation;
+    float cos_spot_angle;
+    float inv_spot_attenuation;
 };
 
 struct Vertex {

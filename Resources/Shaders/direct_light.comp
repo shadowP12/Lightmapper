@@ -1,0 +1,20 @@
+#version 450 core
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(push_constant) uniform BakeParams {
+    vec4 bound_size;
+    vec4 to_cell_offset;
+    vec4 to_cell_size;
+    ivec2 atlas_size;
+    float bias;
+    uint ray_count;
+    uint ray_to;
+    uint ray_from;
+    uint light_count;
+    uint grid_size;
+} params;
+
+void main() {
+    ivec2 atlas_pos = ivec2(gl_GlobalInvocationID.xy);
+}
