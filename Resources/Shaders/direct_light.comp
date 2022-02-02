@@ -2,6 +2,57 @@
 
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+struct Vertex {
+    vec4 position;
+    vec4 normal;
+    vec2 uv0;
+    vec2 uv1;
+};
+
+layout(set = 0, binding = 2000, std430) restrict readonly buffer Vertices {
+    Vertex data[];
+} vertices;
+
+struct Triangle {
+    uvec4 indices;
+    vec4 min_bounds;
+    vec4 max_bounds;
+};
+
+layout(set = 0, binding = 2001, std430) restrict readonly buffer Triangles {
+    Triangle data[];
+} triangles;
+
+layout(set = 0, binding = 2002, std430) restrict readonly buffer GridIndices {
+    uint data[];
+} grid_indices;
+
+#define LIGHT_TYPE_DIRECTIONAL 0
+#define LIGHT_TYPE_OMNI 1
+#define LIGHT_TYPE_SPOT 2
+
+struct Light {
+    vec3 position;
+    uint type;
+    vec4 direction_energy;
+    vec4 color;
+    float range;
+    float attenuation;
+    float cos_spot_angle;
+    float inv_spot_attenuation;
+};
+
+layout(set = 0, binding = 2003, std430) restrict readonly buffer Lights {
+    Light data[];
+} lights;
+
+layout(binding = 1000) uniform texture2D position_texture;
+layout(binding = 1001) uniform texture2D normal_texture;
+layout(binding = 1002) uniform utexture3D grid_texture;
+layout(binding = 2004, rgba32f) uniform image2D dest_light_texture;
+layout(binding = 3000) uniform sampler linear_sampler;
+layout(binding = 3001) uniform sampler nearest_sampler;
+
 layout(push_constant) uniform BakeParams {
     vec4 bound_size;
     vec4 to_cell_offset;
@@ -15,6 +66,160 @@ layout(push_constant) uniform BakeParams {
     uint grid_size;
 } params;
 
+bool RayHitTriangle(vec3 from, vec3 dir, float max_dist, vec3 p0, vec3 p1, vec3 p2, out float r_distance, out vec3 r_barycentric) {
+    const float EPSILON = 0.00001;
+    const vec3 e0 = p1 - p0;
+    const vec3 e1 = p0 - p2;
+    vec3 triangle_normal = cross(e1, e0);
+
+    float n_dot_dir = dot(triangle_normal, dir);
+
+    if (abs(n_dot_dir) < EPSILON) {
+        return false;
+    }
+
+    const vec3 e2 = (p0 - from) / n_dot_dir;
+    const vec3 i = cross(dir, e2);
+
+    r_barycentric.y = dot(i, e1);
+    r_barycentric.z = dot(i, e0);
+    r_barycentric.x = 1.0 - (r_barycentric.z + r_barycentric.y);
+    r_distance = dot(triangle_normal, e2);
+
+    return (r_distance > 0.0) && (r_distance < max_dist) && all(greaterThanEqual(r_barycentric, vec3(0.0)));
+}
+
+const uint RAY_MISS = 0;
+const uint RAY_FRONT = 1;
+const uint RAY_BACK = 2;
+const uint RAY_ANY = 3;
+
+uint TraceRay(vec3 p_from, vec3 p_to) {
+    vec3 rel = p_to - p_from;
+    float rel_len = length(rel);
+    vec3 dir = normalize(rel);
+    vec3 inv_dir = 1.0 / dir;
+    vec3 from_cell = (p_from - params.to_cell_offset.xyz) * params.to_cell_size.xyz;
+    vec3 to_cell = (p_to - params.to_cell_offset.xyz) * params.to_cell_size.xyz;
+    vec3 rel_cell = to_cell - from_cell;
+    ivec3 icell = ivec3(from_cell);
+    ivec3 iendcell = ivec3(to_cell);
+    vec3 dir_cell = normalize(rel_cell);
+    vec3 delta = min(abs(1.0 / dir_cell), params.grid_size);
+    ivec3 step = ivec3(sign(rel_cell));
+    vec3 side = (sign(rel_cell) * (vec3(icell) - from_cell) + (sign(rel_cell) * 0.5) + 0.5) * delta;
+
+    uint iters = 0;
+    while (all(greaterThanEqual(icell, ivec3(0))) && all(lessThan(icell, ivec3(params.grid_size))) && iters < 1000) {
+        uvec2 cell_data = texelFetch(usampler3D(grid_texture, nearest_sampler), icell, 0).xy;
+        if (cell_data.x > 0) {
+            uint hit = RAY_MISS;
+            float best_distance = 1e20;
+
+            for (uint i = 0; i < cell_data.x; i++) {
+                uint tidx = grid_indices.data[cell_data.y + i];
+
+                Triangle triangle = triangles.data[tidx];
+                vec3 t0 = (triangle.min_bounds.xyz - p_from) * inv_dir;
+                vec3 t1 = (triangle.max_bounds.xyz - p_from) * inv_dir;
+                vec3 tmin = min(t0, t1), tmax = max(t0, t1);
+
+                if (max(tmin.x, max(tmin.y, tmin.z)) > min(tmax.x, min(tmax.y, tmax.z))) {
+                    continue;
+                }
+
+                vec3 vtx0 = vertices.data[triangle.indices.x].position.xyz;
+                vec3 vtx1 = vertices.data[triangle.indices.y].position.xyz;
+                vec3 vtx2 = vertices.data[triangle.indices.z].position.xyz;
+
+                float distance;
+                vec3 barycentric;
+                if (RayHitTriangle(p_from, dir, rel_len, vtx0, vtx1, vtx2, distance, barycentric)) {
+                    return RAY_ANY;
+                }
+            }
+        }
+
+        if (icell == iendcell) {
+            break;
+        }
+
+        bvec3 mask = lessThanEqual(side.xyz, min(side.yzx, side.zxy));
+        side += vec3(mask) * delta;
+        icell += ivec3(vec3(mask)) * step;
+
+        iters++;
+    }
+
+    return RAY_MISS;
+}
+
+float GetOmniAttenuation(float distance, float inv_range, float decay) {
+    float nd = distance * inv_range;
+    nd *= nd;
+    nd *= nd;
+    nd = max(1.0 - nd, 0.0);
+    nd *= nd;
+    return nd * pow(max(distance, 0.0001), -decay);
+}
+
 void main() {
     ivec2 atlas_pos = ivec2(gl_GlobalInvocationID.xy);
+    vec3 normal = texelFetch(sampler2D(normal_texture, linear_sampler), atlas_pos, 0).xyz;
+    if (length(normal) < 0.5) {
+        return;
+    }
+    vec3 position = texelFetch(sampler2D(position_texture, linear_sampler), atlas_pos, 0).xyz;
+
+    vec3 static_light = vec3(0.0);
+    for (uint i = 0; i < params.light_count; i++) {
+        vec3 light_pos;
+        float attenuation;
+        if (lights.data[i].type == LIGHT_TYPE_DIRECTIONAL) {
+            vec3 light_vec = lights.data[i].direction_energy.xyz;
+            light_pos = position - light_vec * length(params.bound_size.xyz);
+            attenuation = 1.0;
+        } else {
+            light_pos = lights.data[i].position;
+            float d = distance(position, light_pos);
+            if (d > lights.data[i].range) {
+                continue;
+            }
+
+            attenuation = GetOmniAttenuation(d, 1.0 / lights.data[i].range, lights.data[i].attenuation);
+
+            if (lights.data[i].type == LIGHT_TYPE_SPOT) {
+                vec3 rel = normalize(position - light_pos);
+                float cos_spot_angle = lights.data[i].cos_spot_angle;
+                float cos_angle = dot(rel, lights.data[i].direction_energy.xyz);
+
+                if (cos_angle < cos_spot_angle) {
+                    continue;
+                }
+
+                float scos = max(cos_angle, cos_spot_angle);
+                float spot_rim = max(0.0001, (1.0 - scos) / (1.0 - cos_spot_angle));
+                attenuation *= 1.0 - pow(spot_rim, lights.data[i].inv_spot_attenuation);
+            }
+        }
+
+        vec3 light_dir = normalize(light_pos - position);
+        attenuation *= max(0.0, dot(normal, light_dir));
+
+        if (attenuation <= 0.0001) {
+            continue;
+        }
+
+        if (TraceRay(position + light_dir * params.bias, light_pos) == RAY_MISS) {
+            vec3 light = lights.data[i].color.xyz * lights.data[i].direction_energy.w * attenuation;
+            static_light += light;
+        }
+    }
+
+    vec3 albedo = vec3(0.9, 0.9, 0.9);
+    vec3 emissive = vec3(0.1, 0.1, 0.1);
+
+    static_light *= albedo;
+    static_light += emissive;
+    imageStore(dest_light_texture, atlas_pos, vec4(static_light, 1.0));
 }

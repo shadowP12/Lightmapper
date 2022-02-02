@@ -35,6 +35,8 @@ static std::string ReadFileData(const std::string& path) {
 
 static std::pair<blast::GfxShader*, blast::GfxShader*> CompileShaderProgram(const std::string& vs_path, const std::string& fs_path);
 
+static blast::GfxShader* CompileComputeShader(const std::string& cs_path);
+
 static void RefreshSwapchain(void* window, uint32_t width, uint32_t height);
 
 static void CursorPositionCallback(GLFWwindow* window, double pos_x, double pos_y);
@@ -50,6 +52,9 @@ blast::GfxTexture* position_tex = nullptr;
 blast::GfxTexture* normal_tex = nullptr;
 blast::GfxTexture* unocclude_tex = nullptr;
 blast::GfxRenderPass* raster_renderpass = nullptr;
+blast::GfxTexture* scene_color_tex = nullptr;
+blast::GfxTexture* scene_depth_tex = nullptr;
+blast::GfxRenderPass* scene_renderpass = nullptr;
 blast::GfxShader* blit_vert_shader = nullptr;
 blast::GfxShader* blit_frag_shader = nullptr;
 blast::GfxPipeline* blit_pipeline = nullptr;
@@ -60,6 +65,7 @@ blast::GfxShader* raster_vert_shader = nullptr;
 blast::GfxShader* raster_frag_shader = nullptr;
 blast::GfxPipeline* raster_line_pipeline = nullptr;
 blast::GfxPipeline* raster_triangle_pipeline = nullptr;
+blast::GfxShader* direct_light_shader = nullptr;
 blast::GfxBuffer* object_ub = nullptr;
 
 // Acceleration Structures Begin
@@ -71,7 +77,9 @@ blast::GfxTexture* grid_tex = nullptr;
 // Acceleration Structures End
 
 // LightMap Begin
-blast::GfxBuffer* light_ub = nullptr;
+blast::GfxSampler* linear_sampler = nullptr;
+blast::GfxSampler* nearest_sampler = nullptr;
+blast::GfxBuffer* light_buffer = nullptr;
 blast::GfxTexture* source_light_tex = nullptr;
 blast::GfxTexture* dest_light_tex = nullptr;
 // LightMap End
@@ -135,6 +143,18 @@ int main() {
         raster_vert_shader = shaders.first;
         raster_frag_shader = shaders.second;
     }
+    {
+        direct_light_shader = CompileComputeShader(ProjectDir + "/Resources/Shaders/direct_light.comp");
+    }
+
+    // 设置灯光
+    std::vector<Light> lights;
+    Light dir_lit;
+    dir_lit.position = glm::vec3(0.0f, 100.0f, 0.0f);
+    dir_lit.type = LIGHT_TYPE_DIRECTIONAL;
+    dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 1.0f);
+    dir_lit.color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+    lights.push_back(dir_lit);
 
     // 加载场景资源
     std::vector<ObjectUniforms> object_storages;
@@ -218,7 +238,7 @@ int main() {
     blast::GfxCommandBuffer* copy_cmd = g_device->RequestCommandBuffer(blast::QUEUE_COPY);
     AccelerationStructures* as = BuildAccelerationStructures(display_scene);
     {
-        blast::GfxBufferBarrier buffer_barriers[4] = {};
+        blast::GfxBufferBarrier buffer_barriers[5] = {};
         blast::GfxTextureBarrier texture_barrier = {};
 
         blast::GfxTextureDesc texture_desc;
@@ -268,6 +288,12 @@ int main() {
         triangle_index_buffer = g_device->CreateBuffer(buffer_desc);
         g_device->UpdateBuffer(copy_cmd, triangle_index_buffer, as->triangle_indices.data(), sizeof(uint32_t) * as->triangle_indices.size());
 
+        buffer_desc.size = sizeof(Light) * lights.size();
+        buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+        buffer_desc.res_usage = blast::RESOURCE_USAGE_RW_BUFFER;
+        light_buffer = g_device->CreateBuffer(buffer_desc);
+        g_device->UpdateBuffer(copy_cmd, light_buffer, lights.data(), sizeof(Light) * lights.size());
+
         buffer_barriers[0].buffer = vertex_buffer;
         buffer_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
         buffer_barriers[1].buffer = triangle_buffer;
@@ -276,32 +302,21 @@ int main() {
         buffer_barriers[2].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
         buffer_barriers[3].buffer = triangle_index_buffer;
         buffer_barriers[3].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+        buffer_barriers[4].buffer = light_buffer;
+        buffer_barriers[4].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
         texture_barrier.texture = grid_tex;
-        texture_barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
+        texture_barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
 
         g_device->SetBarrier(copy_cmd, 4, buffer_barriers, 1, &texture_barrier);
     }
 
     // LightMap
-    std::vector<Light> lights;
     {
-        Light dir_lit;
-        dir_lit.position_type = glm::vec4(0.0f, 100.0f, 0.0f, 0.0f);
-        dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
-        dir_lit.color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
-        lights.push_back(dir_lit);
 
-        blast::GfxBufferDesc buffer_desc = {};
-        buffer_desc.size = sizeof(Light) * lights.size();
-        buffer_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
-        buffer_desc.res_usage = blast::RESOURCE_USAGE_UNIFORM_BUFFER;
-        light_ub = g_device->CreateBuffer(buffer_desc);
-        g_device->UpdateBuffer(copy_cmd, light_ub, lights.data(), sizeof(Light) * lights.size());
-
-        blast::GfxBufferBarrier buffer_barrier = {};
-        buffer_barrier.buffer = light_ub;
-        buffer_barrier.new_state = blast::RESOURCE_STATE_SHADER_RESOURCE | blast::RESOURCE_STATE_UNORDERED_ACCESS;
-        g_device->SetBarrier(copy_cmd, 1, &buffer_barrier, 0, nullptr);
+//        blast::GfxBufferBarrier buffer_barrier = {};
+//        buffer_barrier.buffer = light_buffer;
+//        buffer_barrier.new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+//        g_device->SetBarrier(copy_cmd, 1, &buffer_barrier, 0, nullptr);
 
         blast::GfxTextureDesc texture_desc;
         texture_desc.width = lightmap_param.width;
@@ -311,6 +326,12 @@ int main() {
         texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_UNORDERED_ACCESS;
         source_light_tex = g_device->CreateTexture(texture_desc);
         dest_light_tex = g_device->CreateTexture(texture_desc);
+
+        blast::GfxSamplerDesc sampler_desc = {};
+        linear_sampler = g_device->CreateSampler(sampler_desc);
+        sampler_desc.min_filter = blast::FILTER_NEAREST;
+        sampler_desc.mag_filter = blast::FILTER_NEAREST;
+        nearest_sampler = g_device->CreateSampler(sampler_desc);
     }
 
     glfwInit();
@@ -342,6 +363,7 @@ int main() {
         if (!is_baked) {
             is_baked = true;
 
+            // raster
             blast::GfxTextureBarrier texture_barriers[3];
             texture_barriers[0].texture = position_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_RENDERTARGET;
@@ -381,7 +403,7 @@ int main() {
 
             g_device->BindUAV(cmd, triangle_buffer, 1);
 
-            g_device->Draw(cmd, as->triangles.size() * 3, 0);
+            //g_device->Draw(cmd, as->triangles.size() * 3, 0);
 
             g_device->RenderPassEnd(cmd);
 
@@ -393,6 +415,7 @@ int main() {
             texture_barriers[2].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
             g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
 
+            // ray trace
             bake_param.atlas_size = glm::ivec2(lightmap_param.width, lightmap_param.height);
             bake_param.grid_size = MAX_GRID_SIZE;
             bake_param.bias = 0.0f;
@@ -401,8 +424,44 @@ int main() {
             bake_param.to_cell_offset = glm::vec4(as->bounds.position, 0.0f);
             bake_param.to_cell_size.x = (1.0f / as->bounds.size.x) * float(MAX_GRID_SIZE);
             bake_param.to_cell_size.y = (1.0f / as->bounds.size.y) * float(MAX_GRID_SIZE);
-            bake_param.to_cell_size.z = (1.0f / as->bounds.size.y) * float(MAX_GRID_SIZE);
+            bake_param.to_cell_size.z = (1.0f / as->bounds.size.z) * float(MAX_GRID_SIZE);
 
+            // step1
+            texture_barriers[0].texture = source_light_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+            g_device->SetBarrier(cmd, 0, nullptr, 1, texture_barriers);
+
+            g_device->BindComputeShader(cmd, direct_light_shader);
+
+            g_device->BindUAV(cmd, vertex_buffer, 0);
+
+            g_device->BindUAV(cmd, triangle_buffer, 1);
+
+            g_device->BindUAV(cmd, triangle_index_buffer, 2);
+
+            g_device->BindUAV(cmd, light_buffer, 3);
+
+            g_device->BindUAV(cmd, source_light_tex, 4);
+
+            g_device->BindSampler(cmd, linear_sampler, 0);
+
+            g_device->BindSampler(cmd, nearest_sampler, 1);
+
+            g_device->BindResource(cmd, position_tex, 0);
+
+            g_device->BindResource(cmd, normal_tex, 1);
+
+            g_device->BindResource(cmd, grid_tex, 2);
+
+            g_device->PushConstants(cmd, &bake_param, sizeof(BakeParam));
+
+            g_device->Dispatch(cmd, std::max(1u, (uint32_t)(lightmap_param.width) / 16), std::max(1u, (uint32_t)(lightmap_param.height) / 16), 1);
+
+            texture_barriers[0].texture = source_light_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            g_device->SetBarrier(cmd, 0, nullptr, 1, texture_barriers);
+
+            // step2
         }
 
         // 更新Object Uniform
@@ -425,8 +484,61 @@ int main() {
         g_device->UpdateBuffer(cmd, object_ub, object_storages.data(), sizeof(ObjectUniforms) * object_storages.size());
 
         // 绘制场景
+        {
+            blast::GfxTextureBarrier texture_barriers[2];
+            texture_barriers[0].texture = scene_color_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_RENDERTARGET;
+            texture_barriers[1].texture = scene_depth_tex;
+            texture_barriers[1].new_state = blast::RESOURCE_STATE_DEPTH_WRITE;
+            g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
+
+            g_device->RenderPassBegin(cmd, scene_renderpass);
+
+            for (uint32_t i = 0; i < display_scene.size(); ++i) {
+                blast::Viewport viewport;
+                viewport.x = 0;
+                viewport.y = 0;
+                viewport.w = frame_width;
+                viewport.h = frame_height;
+                g_device->BindViewports(cmd, 1, &viewport);
+
+                blast::Rect rect;
+                rect.left = 0;
+                rect.top = 0;
+                rect.right = frame_width;
+                rect.bottom = frame_height;
+                g_device->BindScissorRects(cmd, 1, &rect);
+
+                g_device->BindPipeline(cmd, scene_pipeline);
+
+                g_device->BindResource(cmd, source_light_tex, 0);
+
+                g_device->BindSampler(cmd, linear_sampler, 0);
+
+                g_device->BindConstantBuffer(cmd, object_ub, 0, sizeof(ObjectUniforms), (i + 1) * sizeof(ObjectUniforms));
+
+                blast::GfxBuffer* vertex_buffers[] = {display_scene[i]->GetVertexBuffer()};
+                uint64_t vertex_offsets[] = {0};
+                g_device->BindVertexBuffers(cmd, vertex_buffers, 0, 1, vertex_offsets);
+
+                g_device->BindIndexBuffer(cmd, display_scene[i]->GetIndexBuffer(), display_scene[i]->GetIndexType(), 0);
+
+                g_device->DrawIndexed(cmd, display_scene[i]->GetIndexCount(), 0, 0);
+            }
+
+            g_device->RenderPassEnd(cmd);
+
+            texture_barriers[0].texture = scene_color_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            texture_barriers[1].texture = scene_depth_tex;
+            texture_barriers[1].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
+        }
+
         g_device->RenderPassBegin(cmd, g_swapchain);
-        for (uint32_t i = 0; i < display_scene.size(); ++i) {
+        {
+            g_device->BindPipeline(cmd, blit_pipeline);
+
             blast::Viewport viewport;
             viewport.x = 0;
             viewport.y = 0;
@@ -441,36 +553,9 @@ int main() {
             rect.bottom = frame_height;
             g_device->BindScissorRects(cmd, 1, &rect);
 
-            g_device->BindPipeline(cmd, scene_pipeline);
+            g_device->BindResource(cmd, scene_color_tex, 0);
 
-            g_device->BindConstantBuffer(cmd, object_ub, 0, sizeof(ObjectUniforms), (i + 1) * sizeof(ObjectUniforms));
-
-            blast::GfxBuffer* vertex_buffers[] = {display_scene[i]->GetVertexBuffer()};
-            uint64_t vertex_offsets[] = {0};
-            g_device->BindVertexBuffers(cmd, vertex_buffers, 0, 1, vertex_offsets);
-
-            g_device->BindIndexBuffer(cmd, display_scene[i]->GetIndexBuffer(), display_scene[i]->GetIndexType(), 0);
-
-            g_device->DrawIndexed(cmd, display_scene[i]->GetIndexCount(), 0, 0);
-        }
-
-        // 绘制平面
-        {
-            blast::Viewport viewport;
-            viewport.x = frame_width * 0.75f;
-            viewport.y = frame_height * 0.75f;
-            viewport.w = frame_width * 0.25f;
-            viewport.h = frame_height * 0.25f;
-            g_device->BindViewports(cmd, 1, &viewport);
-
-            blast::Rect rect;
-            rect.left = 0;
-            rect.top = 0;
-            rect.right = frame_width;
-            rect.bottom = frame_height;
-            g_device->BindScissorRects(cmd, 1, &rect);
-
-            g_device->BindPipeline(cmd, blit_pipeline);
+            g_device->BindSampler(cmd, linear_sampler, 0);
 
             g_device->BindConstantBuffer(cmd, object_ub, 0, sizeof(ObjectUniforms), 0);
 
@@ -479,6 +564,22 @@ int main() {
             g_device->BindVertexBuffers(cmd, vertex_buffers, 0, 1, vertex_offsets);
 
             g_device->BindIndexBuffer(cmd, quad_model->GetIndexBuffer(), quad_model->GetIndexType(), 0);
+
+            g_device->DrawIndexed(cmd, quad_model->GetIndexCount(), 0, 0);
+
+            viewport.x = frame_width * 0.75f;
+            viewport.y = frame_height * 0.75f;
+            viewport.w = frame_width * 0.25f;
+            viewport.h = frame_height * 0.25f;
+            g_device->BindViewports(cmd, 1, &viewport);
+
+            rect.left = 0;
+            rect.top = 0;
+            rect.right = frame_width;
+            rect.bottom = frame_height;
+            g_device->BindScissorRects(cmd, 1, &rect);
+
+            g_device->BindResource(cmd, source_light_tex, 0);
 
             g_device->DrawIndexed(cmd, quad_model->GetIndexCount(), 0, 0);
         }
@@ -506,6 +607,7 @@ int main() {
     g_device->DestroyShader(scene_frag_shader);
     g_device->DestroyShader(raster_vert_shader);
     g_device->DestroyShader(raster_frag_shader);
+    g_device->DestroyShader(direct_light_shader);
 
     // 清除光栅化RenderPass资源
     g_device->DestroyTexture(position_tex);
@@ -525,9 +627,17 @@ int main() {
     g_device->DestroyTexture(grid_tex);
 
     // LightMap
-    g_device->DestroyBuffer(light_ub);
+    g_device->DestroySampler(linear_sampler);
+    g_device->DestroySampler(nearest_sampler);
+    g_device->DestroyBuffer(light_buffer);
     g_device->DestroyTexture(source_light_tex);
     g_device->DestroyTexture(dest_light_tex);
+
+    if (scene_renderpass) {
+        g_device->DestroyTexture(scene_color_tex);
+        g_device->DestroyTexture(scene_depth_tex);
+        g_device->DestroyRenderPass(scene_renderpass);
+    }
 
     // 清空管线资源
     if (blit_pipeline) {
@@ -553,6 +663,42 @@ int main() {
 }
 
 void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
+    if (scene_renderpass) {
+        g_device->DestroyTexture(scene_color_tex);
+        g_device->DestroyTexture(scene_depth_tex);
+        g_device->DestroyRenderPass(scene_renderpass);
+    }
+    blast::GfxTextureDesc texture_desc = {};
+    texture_desc.width = width;
+    texture_desc.height = height;
+    texture_desc.sample_count = blast::SAMPLE_COUNT_1;
+    texture_desc.format = blast::FORMAT_R8G8B8A8_UNORM;
+    texture_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
+    texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_RENDER_TARGET;
+    texture_desc.clear.color[0] = 0.0f;
+    texture_desc.clear.color[1] = 0.0f;
+    texture_desc.clear.color[2] = 0.0f;
+    texture_desc.clear.color[3] = 0.0f;
+    // 默认深度值为1
+    texture_desc.clear.depthstencil.depth = 1.0f;
+    scene_color_tex = g_device->CreateTexture(texture_desc);
+
+    texture_desc.format = blast::FORMAT_D24_UNORM_S8_UINT;
+    texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_DEPTH_STENCIL;
+    scene_depth_tex = g_device->CreateTexture(texture_desc);
+
+    blast::GfxRenderPassDesc renderpass_desc = {};
+    renderpass_desc.attachments.push_back(blast::RenderPassAttachment::RenderTarget(scene_color_tex, -1, blast::LOAD_CLEAR));
+    renderpass_desc.attachments.push_back(
+            blast::RenderPassAttachment::DepthStencil(
+                    scene_depth_tex,
+                    -1,
+                    blast::LOAD_CLEAR,
+                    blast::STORE_STORE
+            )
+    );
+    scene_renderpass = g_device->CreateRenderPass(renderpass_desc);
+
     blast::GfxSwapChainDesc swapchain_desc;
     swapchain_desc.window = window;
     swapchain_desc.width = width;
@@ -630,7 +776,7 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
         }
 
         blast::GfxPipelineDesc pipeline_desc;
-        pipeline_desc.sc = g_swapchain;
+        pipeline_desc.rp = scene_renderpass;
         pipeline_desc.vs = scene_vert_shader;
         pipeline_desc.fs = scene_frag_shader;
         pipeline_desc.il = &input_layout;
@@ -695,6 +841,20 @@ static std::pair<blast::GfxShader*, blast::GfxShader*> CompileShaderProgram(cons
     }
 
     return std::make_pair(vert_shader, frag_shader);
+}
+
+static blast::GfxShader* CompileComputeShader(const std::string& cs_path) {
+    blast::GfxShader* comp_shader = nullptr;
+    blast::ShaderCompileDesc compile_desc;
+    compile_desc.code = ReadFileData(cs_path);
+    compile_desc.stage = blast::SHADER_STAGE_COMP;
+    blast::ShaderCompileResult compile_result = g_shader_compiler->Compile(compile_desc);
+    blast::GfxShaderDesc shader_desc;
+    shader_desc.stage = blast::SHADER_STAGE_COMP;
+    shader_desc.bytecode = compile_result.bytes.data();
+    shader_desc.bytecode_length = compile_result.bytes.size() * sizeof(uint32_t);
+    comp_shader = g_device->CreateShader(shader_desc);
+    return comp_shader;
 }
 
 static void CursorPositionCallback(GLFWwindow* window, double pos_x, double pos_y) {

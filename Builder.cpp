@@ -194,7 +194,14 @@ static bool TriangleBoxOverlap(const glm::vec3 &boxcenter, const glm::vec3 boxha
     return PlaneBoxOverlap(normal, d, boxhalfsize);
 }
 
+static bool first_debug = true;
+
 void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_offset, const AABB& bounds, const glm::vec3 points[3], uint32_t triangle_index, std::vector<TriangleSort>& triangles) {
+    if (first_debug) {
+        printf("bbox pos:  %f   %f   %f\n", bounds.position.x, bounds.position.y, bounds.position.z);
+        printf("bbox size:  %f   %f   %f\n", bounds.size.x, bounds.size.y, bounds.size.z);
+    }
+
     int half_size = grid_size / 2;
 
     for (int i = 0; i < 8; i++) {
@@ -223,11 +230,17 @@ void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_off
         }
 
         if (half_size == 1) {
+            if (first_debug) {
+                printf("final %d   %d    %d\n", n.x, n.y, n.z);
+            }
             TriangleSort ts;
             ts.cell_index = n.x + (n.y * MAX_GRID_SIZE) + (n.z * MAX_GRID_SIZE * MAX_GRID_SIZE);
             ts.triangle_index = triangle_index;
             triangles.push_back(ts);
         } else {
+            if (first_debug) {
+                printf("sub %d   %d    %d\n", n.x, n.y, n.z);
+            }
             PlotTriangleIntoTriangleIndexList(half_size, n, aabb, points, triangle_index, triangles);
         }
     }
@@ -269,10 +282,6 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
         std::unordered_map<Edge, EdgeUV, MurmurHash<Edge>, EdgeEq> edges;
         uint16_t* index16_data = (uint16_t*)models[i]->GetIndexData();
         uint32_t* index32_data = (uint32_t*)models[i]->GetIndexData();
-
-        if (i == 0) {
-            as->bounds.position = ((glm::vec3*)models[i]->GetPositionData())[0];
-        }
 
         for (int j = 0; j < models[i]->GetIndexCount(); j+=3) {
             uint32_t indices[3];
@@ -364,7 +373,17 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
                 as->vertices[t.indices[2]].position,
         };
 
-        PlotTriangleIntoTriangleIndexList(128, glm::ivec3(0), as->bounds, face, i, triangle_sort);
+        if (first_debug) {
+            printf("v0:  %f   %f   %f\n", face[0].x, face[0].y, face[0].z);
+            printf("v1:  %f   %f   %f\n", face[1].x, face[1].y, face[1].z);
+            printf("v2:  %f   %f   %f\n", face[2].x, face[2].y, face[2].z);
+        }
+
+        PlotTriangleIntoTriangleIndexList(MAX_GRID_SIZE, glm::ivec3(0), as->bounds, face, i, triangle_sort);
+
+        if (first_debug) {
+            first_debug = false;
+        }
     }
 
     // 排序

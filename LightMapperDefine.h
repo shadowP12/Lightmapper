@@ -48,8 +48,13 @@ struct MurmurHash {
     }
 };
 
+#define LIGHT_TYPE_DIRECTIONAL 0
+#define LIGHT_TYPE_OMNI 1
+#define LIGHT_TYPE_SPOT 2
+
 struct Light {
-    glm::vec4 position_type;
+    glm::vec3 position;
+    uint32_t type;
     glm::vec4 direction_energy;
     glm::vec4 color;
     float range;
@@ -188,6 +193,10 @@ public:
     }
 
     void Expand(const glm::vec3& point) {
+        if (point.x < 0) {
+            int m = 2;
+        }
+
         glm::vec3 begin = position;
         glm::vec3 end = position + size;
 
