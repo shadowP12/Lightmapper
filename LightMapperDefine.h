@@ -5,6 +5,10 @@
 #include <gtx/quaternion.hpp>
 #include <gtc/matrix_transform.hpp>
 
+static float gInfinity = std::numeric_limits<float>::infinity();
+static float gNegInfinity = -gInfinity;
+static float gEpsilon = std::numeric_limits<float>::epsilon();
+
 #define SAFE_DELETE(x) \
     { \
         delete x; \
@@ -150,26 +154,24 @@ struct TriangleSort {
 
 class AABB {
 public:
-    glm::vec3 position;
-    glm::vec3 size;
+    glm::vec3 min = glm::vec3(gInfinity, gInfinity, gInfinity);
+    glm::vec3 max = glm::vec3(gNegInfinity, gNegInfinity, gNegInfinity);
 
     bool operator==(const AABB &other) const {
-        return ((position == other.position) && (size == other.size));
+        return ((min == other.min) && (max == other.max));
     }
 
     bool operator!=(const AABB &other) const {
-        return ((position != other.position) || (size != other.size));
+        return ((min != other.min) || (max != other.max));
     }
 
     void Merge(const AABB &other) {
         glm::vec3 beg_1, beg_2;
         glm::vec3 end_1, end_2;
-        glm::vec3 min, max;
-
-        beg_1 = position;
-        beg_2 = other.position;
-        end_1 = size + beg_1;
-        end_2 = other.size + beg_2;
+        beg_1 = min;
+        beg_2 = other.min;
+        end_1 = max;
+        end_2 = other.max;
 
         min.x = (beg_1.x < beg_2.x) ? beg_1.x : beg_2.x;
         min.y = (beg_1.y < beg_2.y) ? beg_1.y : beg_2.y;
@@ -178,53 +180,39 @@ public:
         max.x = (end_1.x > end_2.x) ? end_1.x : end_2.x;
         max.y = (end_1.y > end_2.y) ? end_1.y : end_2.y;
         max.z = (end_1.z > end_2.z) ? end_1.z : end_2.z;
-
-        position = min;
-        size = max - min;
     }
 
     void Grow(float amount) {
-        position.x -= amount;
-        position.y -= amount;
-        position.z -= amount;
-        size.x += 2.0 * amount;
-        size.y += 2.0 * amount;
-        size.z += 2.0 * amount;
+        min.x -= amount;
+        min.y -= amount;
+        min.z -= amount;
+        max.x += amount;
+        max.y += amount;
+        max.z += amount;
     }
 
     void Expand(const glm::vec3& point) {
-        if (point.x < 0) {
-            int m = 2;
-        }
+        min.x = glm::min(min.x, point.x);
+        min.y = glm::min(min.y, point.y);
+        min.z = glm::min(min.z, point.z);
+        max.x = glm::max(max.x, point.x);
+        max.y = glm::max(max.y, point.y);
+        max.z = glm::max(max.z, point.z);
+    }
 
-        glm::vec3 begin = position;
-        glm::vec3 end = position + size;
+    glm::vec3 GetSize() {
+        return max - min;
+    }
 
-        if (point.x < begin.x) {
-            begin.x = point.x;
-        }
-        if (point.y < begin.y) {
-            begin.y = point.y;
-        }
-        if (point.z < begin.z) {
-            begin.z = point.z;
-        }
+    glm::vec3 GetCenter() {
+        return (max + min) * 0.5f;
+    }
 
-        if (point.x > end.x) {
-            end.x = point.x;
-        }
-        if (point.y > end.y) {
-            end.y = point.y;
-        }
-        if (point.z > end.z) {
-            end.z = point.z;
-        }
-
-        position = begin;
-        size = end - begin;
+    glm::vec3 GetSize() const {
+        return max - min;
     }
 
     glm::vec3 GetCenter() const {
-        return position + (size * 0.5f);
+        return (max + min) * 0.5f;
     }
 };

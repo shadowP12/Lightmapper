@@ -198,33 +198,34 @@ static bool first_debug = true;
 
 void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_offset, const AABB& bounds, const glm::vec3 points[3], uint32_t triangle_index, std::vector<TriangleSort>& triangles) {
     if (first_debug) {
-        printf("bbox pos:  %f   %f   %f\n", bounds.position.x, bounds.position.y, bounds.position.z);
-        printf("bbox size:  %f   %f   %f\n", bounds.size.x, bounds.size.y, bounds.size.z);
+        glm::vec3 bbox_size = bounds.GetSize();
+        printf("bbox pos:  %f   %f   %f\n", bounds.min.x, bounds.min.y, bounds.min.z);
+        printf("bbox size:  %f   %f   %f\n", bbox_size.x, bbox_size.y, bbox_size.z);
     }
 
     int half_size = grid_size / 2;
 
     for (int i = 0; i < 8; i++) {
-        AABB aabb = bounds;
-        aabb.size *= 0.5;
+        glm::vec3 aabb_position = bounds.min;
+        glm::vec3 aabb_size = bounds.GetSize() * 0.5f;
         glm::ivec3 n = grid_offset;
 
         if (i & 1) {
-            aabb.position.x += aabb.size.x;
+            aabb_position.x += aabb_size.x;
             n.x += half_size;
         }
         if (i & 2) {
-            aabb.position.y += aabb.size.y;
+            aabb_position.y += aabb_size.y;
             n.y += half_size;
         }
         if (i & 4) {
-            aabb.position.z += aabb.size.z;
+            aabb_position.z += aabb_size.z;
             n.z += half_size;
         }
 
         {
-            glm::vec3 qsize = aabb.size * 0.5f;
-            if (!TriangleBoxOverlap(aabb.position + qsize, qsize, points)) {
+            glm::vec3 qsize = aabb_size * 0.5f;
+            if (!TriangleBoxOverlap(aabb_position + qsize, qsize, points)) {
                 continue;
             }
         }
@@ -241,6 +242,9 @@ void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_off
             if (first_debug) {
                 printf("sub %d   %d    %d\n", n.x, n.y, n.z);
             }
+            AABB aabb;
+            aabb.min = aabb_position;
+            aabb.max = aabb_position + aabb_size;
             PlotTriangleIntoTriangleIndexList(half_size, n, aabb, points, triangle_index, triangles);
         }
     }
@@ -254,10 +258,6 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
         glm::vec3* normal_data = (glm::vec3*)models[i]->GetNormalData();
         glm::vec2* uv0_data = (glm::vec2*)models[i]->GetUV0Data();
         glm::vec2* uv1_data = (glm::vec2*)models[i]->GetUV1Data();
-
-        if (i == 0) {
-            as->bounds.position = ((glm::vec3*)models[i]->GetPositionData())[0];
-        }
 
         for (int j = 0; j < models[i]->GetVertexCount(); ++j) {
             as->bounds.Expand(position_data[j]);
@@ -304,11 +304,7 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
             Triangle t;
             for (int k = 0; k < 3; k++) {
                 t.indices[k] = indices[k];
-                if (k == 0) {
-                    taabb.position = vtxs[k];
-                } else {
-                    taabb.Expand(vtxs[k]);
-                }
+                taabb.Expand(vtxs[k]);
             }
 
             // 计算seam
@@ -347,12 +343,12 @@ AccelerationStructures* BuildAccelerationStructures(std::vector<Model*>& models)
                 }
             }
 
-            t.min_bounds[0] = taabb.position.x;
-            t.min_bounds[1] = taabb.position.y;
-            t.min_bounds[2] = taabb.position.z;
-            t.max_bounds[0] = taabb.position.x + glm::max(taabb.size.x, 0.0001f);
-            t.max_bounds[1] = taabb.position.y + glm::max(taabb.size.y, 0.0001f);
-            t.max_bounds[2] = taabb.position.z + glm::max(taabb.size.z, 0.0001f);
+            t.min_bounds[0] = taabb.min.x;
+            t.min_bounds[1] = taabb.min.y;
+            t.min_bounds[2] = taabb.min.z;
+            t.max_bounds[0] = taabb.max.x;
+            t.max_bounds[1] = taabb.max.y;
+            t.max_bounds[2] = taabb.max.z;
             as->triangles.push_back(t);
         }
 

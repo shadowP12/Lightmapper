@@ -403,7 +403,7 @@ int main() {
 
             g_device->BindUAV(cmd, triangle_buffer, 1);
 
-            //g_device->Draw(cmd, as->triangles.size() * 3, 0);
+            g_device->Draw(cmd, as->triangles.size() * 3, 0);
 
             g_device->RenderPassEnd(cmd);
 
@@ -420,11 +420,11 @@ int main() {
             bake_param.grid_size = MAX_GRID_SIZE;
             bake_param.bias = 0.0f;
             bake_param.light_count = lights.size();
-            bake_param.bound_size = glm::vec4(as->bounds.size, 0.0f);
-            bake_param.to_cell_offset = glm::vec4(as->bounds.position, 0.0f);
-            bake_param.to_cell_size.x = (1.0f / as->bounds.size.x) * float(MAX_GRID_SIZE);
-            bake_param.to_cell_size.y = (1.0f / as->bounds.size.y) * float(MAX_GRID_SIZE);
-            bake_param.to_cell_size.z = (1.0f / as->bounds.size.z) * float(MAX_GRID_SIZE);
+            bake_param.bound_size = glm::vec4(as->bounds.GetSize(), 0.0f);
+            bake_param.to_cell_offset = glm::vec4(as->bounds.min, 0.0f);
+            bake_param.to_cell_size.x = (1.0f / as->bounds.GetSize().x) * float(MAX_GRID_SIZE);
+            bake_param.to_cell_size.y = (1.0f / as->bounds.GetSize().y) * float(MAX_GRID_SIZE);
+            bake_param.to_cell_size.z = (1.0f / as->bounds.GetSize().z) * float(MAX_GRID_SIZE);
 
             // step1
             texture_barriers[0].texture = source_light_tex;
@@ -471,8 +471,8 @@ int main() {
 
         glm::mat4 view_matrix = glm::lookAt(camera.position, camera.position + camera.front, camera.up);
 
-        float fov = glm::radians(45.0);
-        float aspect = frame_width / frame_height;
+        float fov = glm::radians(60.0);
+        float aspect = frame_width / (float)frame_height;
         glm::mat4 proj_matrix = glm::perspective(fov, aspect, 0.1f, 100.0f);
         proj_matrix[1][1] *= -1;
 
