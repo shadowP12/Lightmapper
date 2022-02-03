@@ -179,7 +179,12 @@ int main() {
         mesh_decl.indexFormat = display_scene[i]->GetIndexType() == blast::INDEX_TYPE_UINT16 ? xatlas::IndexFormat::UInt16 : xatlas::IndexFormat::UInt32;
         xatlas::AddMeshError ret = xatlas::AddMesh(atlas, mesh_decl);
     }
-    xatlas::Generate(atlas);
+    xatlas::ChartOptions chartOptions;
+    xatlas::PackOptions packOptions;
+    packOptions.bilinear = false;
+    packOptions.texelsPerUnit = 32;
+    packOptions.resolution = 1024;
+    xatlas::Generate(atlas, chartOptions, packOptions);
     lightmap_param.width = atlas->width;
     lightmap_param.height = atlas->height;
     for (uint32_t i = 0; i < atlas->meshCount; ++i) {
@@ -418,7 +423,7 @@ int main() {
             // ray trace
             bake_param.atlas_size = glm::ivec2(lightmap_param.width, lightmap_param.height);
             bake_param.grid_size = MAX_GRID_SIZE;
-            bake_param.bias = 0.0f;
+            bake_param.bias = 0.01f;
             bake_param.light_count = lights.size();
             bake_param.bound_size = glm::vec4(as->bounds.GetSize(), 0.0f);
             bake_param.to_cell_offset = glm::vec4(as->bounds.min, 0.0f);
