@@ -33,6 +33,14 @@ static std::string ReadFileData(const std::string& path) {
     return std::string((std::istreambuf_iterator<char>(*stream)), std::istreambuf_iterator<char>());
 }
 
+static glm::vec4 RandomColor() {
+    uint8_t color[3];
+    for (int i = 0; i < 3; i++) {
+        color[i] = uint8_t((rand() % 255 + 192) * 0.5f);
+    }
+    return glm::vec4(color[0] / 255.0f, color[1] / 255.0f, color[2] / 255.0f, 1.0f);
+}
+
 static std::pair<blast::GfxShader*, blast::GfxShader*> CompileShaderProgram(const std::string& vs_path, const std::string& fs_path);
 
 static blast::GfxShader* CompileComputeShader(const std::string& cs_path);
@@ -94,6 +102,7 @@ struct ObjectUniforms {
     glm::mat4 model_matrix;
     glm::mat4 view_matrix;
     glm::mat4 proj_matrix;
+    glm::mat4 color;
 };
 
 struct Camera {
@@ -360,6 +369,10 @@ int main() {
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
     glfwSetScrollCallback(window, MouseScrollCallback);
 
+    for (uint32_t i = 0; i < display_scene.size(); ++i) {
+        object_storages[i + 1].color[0] = RandomColor();
+    }
+
     int frame_width = 0, frame_height = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -503,7 +516,7 @@ int main() {
             g_device->SetBarrier(cmd, 0, nullptr, 1, texture_barriers);
 
             // bounce step
-            uint32_t bounces = 2;
+            uint32_t bounces = 0;
             for (uint32_t bounce = 0; bounce < bounces; ++bounce) {
                 // 交换rt
                 if (bounce > 0) {
@@ -545,9 +558,9 @@ int main() {
             }
 
             // dilate step
-            blast::GfxTexture* temp = source_light_tex;
-            source_light_tex = dest_light_tex;
-            dest_light_tex = temp;
+//            blast::GfxTexture* temp = source_light_tex;
+//            source_light_tex = dest_light_tex;
+//            dest_light_tex = temp;
             texture_barriers[0].texture = source_light_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
             texture_barriers[1].texture = dest_light_tex;

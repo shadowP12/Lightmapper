@@ -13,6 +13,7 @@ layout(std140, set = 0, binding = 0) uniform ObjectUniforms {
     mat4 model_matrix;
     mat4 view_matrix;
     mat4 proj_matrix;
+    mat4 color;
 } object_uniforms;
 
 void main() 

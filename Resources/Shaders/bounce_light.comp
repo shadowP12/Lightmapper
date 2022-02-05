@@ -217,6 +217,5 @@ void main() {
     if (active_rays > 0) {
         light_total /= active_rays;
     }
-    light_total += texelFetch(sampler2D(source_light_texture, linear_sampler), atlas_pos, 0).xyz;
     imageStore(dest_light_texture, ivec2(atlas_pos), vec4(light_total, 1.0));
 }
