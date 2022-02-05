@@ -1,4 +1,4 @@
 # Lightmapper
 
 # Screenshots
-![image](https://github.com/hipiPan/GearEngine/blob/main/Screenshots/1.png)
+![image](https://github.com/hipiPan/Lightmapper/tree/main/Screenshots/1.png)
