@@ -93,6 +93,7 @@ blast::GfxSampler* nearest_sampler = nullptr;
 blast::GfxBuffer* light_buffer = nullptr;
 blast::GfxTexture* source_light_tex = nullptr;
 blast::GfxTexture* dest_light_tex = nullptr;
+blast::GfxTexture* sh_light_map = nullptr;
 // LightMap End
 
 Model* quad_model = nullptr;
@@ -354,6 +355,8 @@ int main() {
         texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_UNORDERED_ACCESS;
         source_light_tex = g_device->CreateTexture(texture_desc);
         dest_light_tex = g_device->CreateTexture(texture_desc);
+        texture_desc.num_layers = 4;
+        sh_light_map = g_device->CreateTexture(texture_desc);
 
         blast::GfxSamplerDesc sampler_desc = {};
         linear_sampler = g_device->CreateSampler(sampler_desc);
@@ -466,7 +469,9 @@ int main() {
             texture_barriers[0].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
             texture_barriers[1].texture = dest_light_tex;
             texture_barriers[1].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
-            g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
+            texture_barriers[2].texture = sh_light_map;
+            texture_barriers[2].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+            g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
 
             g_device->BindComputeShader(cmd, clear_color_shader);
 
@@ -474,9 +479,9 @@ int main() {
 
             g_device->BindUAV(cmd, source_light_tex, 0);
 
-            g_device->Dispatch(cmd, std::max(1u, (uint32_t)(lightmap_param.width) / 16), std::max(1u, (uint32_t)(lightmap_param.height) / 16), 1);
+            g_device->BindUAV(cmd, dest_light_tex, 1);
 
-            g_device->BindUAV(cmd, dest_light_tex, 0);
+            g_device->BindUAV(cmd, sh_light_map, 2);
 
             g_device->Dispatch(cmd, std::max(1u, (uint32_t)(lightmap_param.width) / 16), std::max(1u, (uint32_t)(lightmap_param.height) / 16), 1);
 
@@ -753,6 +758,7 @@ int main() {
     g_device->DestroyBuffer(light_buffer);
     g_device->DestroyTexture(source_light_tex);
     g_device->DestroyTexture(dest_light_tex);
+    g_device->DestroyTexture(sh_light_map);
 
     if (scene_renderpass) {
         g_device->DestroyTexture(scene_color_tex);

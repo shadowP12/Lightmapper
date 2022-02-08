@@ -2,12 +2,19 @@
 
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(binding = 2000, rgba32f) uniform image2D dest_texture;
+layout(binding = 2000, rgba32f) uniform image2D source_light_texture;
+layout(binding = 2001, rgba32f) uniform image2D dest_light_texture;
+layout(binding = 2002, rgba32f) uniform image2DArray sh_light_map;
 
 layout(push_constant) uniform ClearParams {
     vec4 clear_color;
 } params;
 
 void main() {
-    imageStore(dest_texture, ivec2(gl_GlobalInvocationID.xy), params.clear_color);
+    imageStore(source_light_texture, ivec2(gl_GlobalInvocationID.xy), params.clear_color);
+    imageStore(dest_light_texture, ivec2(gl_GlobalInvocationID.xy), params.clear_color);
+    imageStore(sh_light_map, ivec3(gl_GlobalInvocationID.xy, 0), params.clear_color);
+    imageStore(sh_light_map, ivec3(gl_GlobalInvocationID.xy, 1), params.clear_color);
+    imageStore(sh_light_map, ivec3(gl_GlobalInvocationID.xy, 2), params.clear_color);
+    imageStore(sh_light_map, ivec3(gl_GlobalInvocationID.xy, 3), params.clear_color);
 }
