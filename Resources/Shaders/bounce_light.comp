@@ -32,6 +32,7 @@ layout(binding = 1001) uniform texture2D normal_texture;
 layout(binding = 1002) uniform utexture3D grid_texture;
 layout(binding = 1003) uniform texture2D source_light_texture;
 layout(binding = 2004, rgba32f) uniform image2D dest_light_texture;
+layout(binding = 2005, rgba32f) uniform image2DArray sh_light_map;
 layout(binding = 3000) uniform sampler linear_sampler;
 layout(binding = 3001) uniform sampler nearest_sampler;
 
@@ -120,7 +121,6 @@ uint TraceRay(vec3 p_from, vec3 p_to, out uint r_triangle, out vec3 r_barycentri
 
                 if (RayHitTriangle(p_from, dir, rel_len, vtx0, vtx1, vtx2, distance, barycentric)) {
                     if (!backface) {
-                        //
                         distance = max(params.bias, distance - params.bias);
                     }
 
@@ -188,6 +188,17 @@ void main() {
     vec3 bitangent = normalize(cross(tangent, normal));
     mat3 normal_mat = mat3(tangent, bitangent, normal);
 
+    vec4 sh_accum[4] = vec4[](
+    vec4(0.0, 0.0, 0.0, 1.0),
+    vec4(0.0, 0.0, 0.0, 1.0),
+    vec4(0.0, 0.0, 0.0, 1.0),
+    vec4(0.0, 0.0, 0.0, 1.0));
+
+    sh_accum[0] = imageLoad(sh_light_map, ivec3(atlas_pos, 0));
+    sh_accum[1] = imageLoad(sh_light_map, ivec3(atlas_pos, 1));
+    sh_accum[2] = imageLoad(sh_light_map, ivec3(atlas_pos, 2));
+    sh_accum[3] = imageLoad(sh_light_map, ivec3(atlas_pos, 3));
+
     vec3 light_average = vec3(0.0);
     float active_rays = 0.0;
     uint noise = RandomSeed(ivec3(atlas_pos, 0));
@@ -210,6 +221,17 @@ void main() {
         }
 
         light_average += light;
+
+        float c[4] = float[](
+            0.282095, //l0
+            0.488603 * ray_dir.y, //l1n1
+            0.488603 * ray_dir.z, //l1n0
+            0.488603 * ray_dir.x //l1p1
+        );
+
+        for (uint j = 0; j < 4; j++) {
+            sh_accum[j].rgb += light * c[j] * (8.0 / float(params.ray_count));
+        }
     }
 
     vec3 light_total = vec3(0.0);
@@ -218,4 +240,8 @@ void main() {
         light_total /= active_rays;
     }
     imageStore(dest_light_texture, ivec2(atlas_pos), vec4(light_total, 1.0));
+    imageStore(sh_light_map, ivec3(atlas_pos, 0), sh_accum[0]);
+    imageStore(sh_light_map, ivec3(atlas_pos, 1), sh_accum[1]);
+    imageStore(sh_light_map, ivec3(atlas_pos, 2), sh_accum[2]);
+    imageStore(sh_light_map, ivec3(atlas_pos, 3), sh_accum[3]);
 }

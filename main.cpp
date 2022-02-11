@@ -94,6 +94,7 @@ blast::GfxBuffer* light_buffer = nullptr;
 blast::GfxTexture* source_light_tex = nullptr;
 blast::GfxTexture* dest_light_tex = nullptr;
 blast::GfxTexture* sh_light_map = nullptr;
+blast::GfxTexture* temp_sh_light_map = nullptr;
 // LightMap End
 
 Model* quad_model = nullptr;
@@ -176,9 +177,18 @@ int main() {
     Light dir_lit;
     dir_lit.position = glm::vec3(0.0f, 100.0f, 0.0f);
     dir_lit.type = LIGHT_TYPE_DIRECTIONAL;
-    dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 1.0f);
+    dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 10.0f);
     dir_lit.color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
-    lights.push_back(dir_lit);
+    //lights.push_back(dir_lit);
+
+    Light point_lit;
+    point_lit.position = glm::vec3(5.0f, 10.0f, 0.0f);
+    point_lit.type = LIGHT_TYPE_OMNI;
+    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 100.0f);
+    point_lit.color = glm::vec4(0.3f, 0.2f, 0.8f, 1.0f);
+    point_lit.range = 20.0f;
+    point_lit.attenuation = 1.0f;
+    lights.push_back(point_lit);
 
     // 加载场景资源
     std::vector<ObjectUniforms> object_storages;
@@ -357,6 +367,7 @@ int main() {
         dest_light_tex = g_device->CreateTexture(texture_desc);
         texture_desc.num_layers = 4;
         sh_light_map = g_device->CreateTexture(texture_desc);
+        temp_sh_light_map = g_device->CreateTexture(texture_desc);
 
         blast::GfxSamplerDesc sampler_desc = {};
         linear_sampler = g_device->CreateSampler(sampler_desc);
@@ -399,7 +410,7 @@ int main() {
             is_baked = true;
 
             // raster
-            blast::GfxTextureBarrier texture_barriers[3];
+            blast::GfxTextureBarrier texture_barriers[4];
             texture_barriers[0].texture = position_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_RENDERTARGET;
             texture_barriers[1].texture = normal_tex;
@@ -453,14 +464,14 @@ int main() {
             // ray trace
             bake_param.atlas_size = glm::ivec2(lightmap_param.width, lightmap_param.height);
             bake_param.grid_size = MAX_GRID_SIZE;
-            bake_param.bias = 0.01f;
+            bake_param.bias = 0.02f;
             bake_param.light_count = lights.size();
             bake_param.bound_size = glm::vec4(as->bounds.GetSize(), 0.0f);
             bake_param.to_cell_offset = glm::vec4(as->bounds.min, 0.0f);
             bake_param.to_cell_size.x = (1.0f / as->bounds.GetSize().x) * float(MAX_GRID_SIZE);
             bake_param.to_cell_size.y = (1.0f / as->bounds.GetSize().y) * float(MAX_GRID_SIZE);
             bake_param.to_cell_size.z = (1.0f / as->bounds.GetSize().z) * float(MAX_GRID_SIZE);
-            bake_param.ray_count = 64;
+            bake_param.ray_count = 1024;
 
             clear_param.clear_color = glm::vec4(0.0f);
 
@@ -471,7 +482,9 @@ int main() {
             texture_barriers[1].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
             texture_barriers[2].texture = sh_light_map;
             texture_barriers[2].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
-            g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
+            texture_barriers[3].texture = temp_sh_light_map;
+            texture_barriers[3].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+            g_device->SetBarrier(cmd, 0, nullptr, 4, texture_barriers);
 
             g_device->BindComputeShader(cmd, clear_color_shader);
 
@@ -502,6 +515,8 @@ int main() {
 
             g_device->BindUAV(cmd, source_light_tex, 4);
 
+            g_device->BindUAV(cmd, sh_light_map, 5);
+
             g_device->BindSampler(cmd, linear_sampler, 0);
 
             g_device->BindSampler(cmd, nearest_sampler, 1);
@@ -521,7 +536,7 @@ int main() {
             g_device->SetBarrier(cmd, 0, nullptr, 1, texture_barriers);
 
             // bounce step
-            uint32_t bounces = 0;
+            uint32_t bounces = 1;
             for (uint32_t bounce = 0; bounce < bounces; ++bounce) {
                 // 交换rt
                 if (bounce > 0) {
@@ -545,6 +560,8 @@ int main() {
 
                 g_device->BindUAV(cmd, dest_light_tex, 4);
 
+                g_device->BindUAV(cmd, sh_light_map, 5);
+
                 g_device->BindSampler(cmd, linear_sampler, 0);
 
                 g_device->BindSampler(cmd, nearest_sampler, 1);
@@ -563,28 +580,32 @@ int main() {
             }
 
             // dilate step
-//            blast::GfxTexture* temp = source_light_tex;
-//            source_light_tex = dest_light_tex;
-//            dest_light_tex = temp;
-            texture_barriers[0].texture = source_light_tex;
-            texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
-            texture_barriers[1].texture = dest_light_tex;
-            texture_barriers[1].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+            blast::GfxTexture* temp = sh_light_map;
+            sh_light_map = temp_sh_light_map;
+            temp_sh_light_map = temp;
+            texture_barriers[0].texture = sh_light_map;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+            texture_barriers[1].texture = temp_sh_light_map;
+            texture_barriers[1].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
             g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
 
             g_device->BindComputeShader(cmd, dilate_shader);
 
-            g_device->BindUAV(cmd, dest_light_tex, 0);
+            g_device->BindResource(cmd, temp_sh_light_map, 0);
+
+            g_device->BindUAV(cmd, sh_light_map, 0);
 
             g_device->BindSampler(cmd, linear_sampler, 0);
-
-            g_device->BindResource(cmd, source_light_tex, 0);
 
             g_device->Dispatch(cmd, std::max(1u, (uint32_t)(lightmap_param.width) / 16), std::max(1u, (uint32_t)(lightmap_param.height) / 16), 1);
 
             texture_barriers[0].texture = dest_light_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
-            g_device->SetBarrier(cmd, 0, nullptr, 1, texture_barriers);
+            texture_barriers[1].texture = sh_light_map;
+            texture_barriers[1].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            texture_barriers[2].texture = temp_sh_light_map;
+            texture_barriers[2].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            g_device->SetBarrier(cmd, 0, nullptr, 3, texture_barriers);
         }
 
         // 更新Object Uniform
@@ -635,6 +656,8 @@ int main() {
                 g_device->BindPipeline(cmd, scene_pipeline);
 
                 g_device->BindResource(cmd, dest_light_tex, 0);
+
+                g_device->BindResource(cmd, sh_light_map, 1);
 
                 g_device->BindSampler(cmd, linear_sampler, 0);
 
@@ -759,6 +782,7 @@ int main() {
     g_device->DestroyTexture(source_light_tex);
     g_device->DestroyTexture(dest_light_tex);
     g_device->DestroyTexture(sh_light_map);
+    g_device->DestroyTexture(temp_sh_light_map);
 
     if (scene_renderpass) {
         g_device->DestroyTexture(scene_color_tex);
