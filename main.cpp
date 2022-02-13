@@ -62,6 +62,7 @@ blast::GfxTexture* unocclude_tex = nullptr;
 blast::GfxRenderPass* raster_renderpass = nullptr;
 blast::GfxTexture* scene_color_tex = nullptr;
 blast::GfxTexture* scene_depth_tex = nullptr;
+blast::GfxTexture* resolve_tex = nullptr;
 blast::GfxRenderPass* scene_renderpass = nullptr;
 blast::GfxShader* blit_vert_shader = nullptr;
 blast::GfxShader* blit_frag_shader = nullptr;
@@ -99,6 +100,7 @@ blast::GfxTexture* temp_sh_light_map = nullptr;
 
 Model* quad_model = nullptr;
 bool is_baked = false;
+blast::SampleCount g_sample_count = blast::SAMPLE_COUNT_4;
 
 struct ObjectUniforms {
     glm::mat4 model_matrix;
@@ -471,7 +473,7 @@ int main() {
             bake_param.to_cell_size.x = (1.0f / as->bounds.GetSize().x) * float(MAX_GRID_SIZE);
             bake_param.to_cell_size.y = (1.0f / as->bounds.GetSize().y) * float(MAX_GRID_SIZE);
             bake_param.to_cell_size.z = (1.0f / as->bounds.GetSize().z) * float(MAX_GRID_SIZE);
-            bake_param.ray_count = 1024;
+            bake_param.ray_count = 64;
 
             clear_param.clear_color = glm::vec4(0.0f);
 
@@ -629,12 +631,18 @@ int main() {
 
         // 绘制场景
         {
-            blast::GfxTextureBarrier texture_barriers[2];
+            uint32_t texture_barrier_count = 2;
+            blast::GfxTextureBarrier texture_barriers[3];
             texture_barriers[0].texture = scene_color_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_RENDERTARGET;
             texture_barriers[1].texture = scene_depth_tex;
             texture_barriers[1].new_state = blast::RESOURCE_STATE_DEPTH_WRITE;
-            g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
+            if (g_sample_count != blast::SAMPLE_COUNT_1) {
+                texture_barriers[2].texture = resolve_tex;
+                texture_barriers[2].new_state = blast::RESOURCE_STATE_COPY_DEST;
+                texture_barrier_count++;
+            }
+            g_device->SetBarrier(cmd, 0, nullptr, texture_barrier_count, texture_barriers);
 
             g_device->RenderPassBegin(cmd, scene_renderpass);
 
@@ -674,11 +682,17 @@ int main() {
 
             g_device->RenderPassEnd(cmd);
 
+            texture_barrier_count = 2;
             texture_barriers[0].texture = scene_color_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
             texture_barriers[1].texture = scene_depth_tex;
             texture_barriers[1].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
-            g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
+            if (g_sample_count != blast::SAMPLE_COUNT_1) {
+                texture_barriers[2].texture = resolve_tex;
+                texture_barriers[2].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+                texture_barrier_count++;
+            }
+            g_device->SetBarrier(cmd, 0, nullptr, texture_barrier_count, texture_barriers);
         }
 
         g_device->RenderPassBegin(cmd, g_swapchain);
@@ -699,7 +713,11 @@ int main() {
             rect.bottom = frame_height;
             g_device->BindScissorRects(cmd, 1, &rect);
 
-            g_device->BindResource(cmd, scene_color_tex, 0);
+            if (g_sample_count != blast::SAMPLE_COUNT_1) {
+                g_device->BindResource(cmd, resolve_tex, 0);
+            } else {
+                g_device->BindResource(cmd, scene_color_tex, 0);
+            }
 
             g_device->BindSampler(cmd, linear_sampler, 0);
 
@@ -787,6 +805,9 @@ int main() {
     if (scene_renderpass) {
         g_device->DestroyTexture(scene_color_tex);
         g_device->DestroyTexture(scene_depth_tex);
+        if (g_sample_count != blast::SAMPLE_COUNT_1) {
+            g_device->DestroyTexture(resolve_tex);
+        }
         g_device->DestroyRenderPass(scene_renderpass);
     }
 
@@ -817,12 +838,15 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
     if (scene_renderpass) {
         g_device->DestroyTexture(scene_color_tex);
         g_device->DestroyTexture(scene_depth_tex);
+        if (g_sample_count != blast::SAMPLE_COUNT_1) {
+            g_device->DestroyTexture(resolve_tex);
+        }
         g_device->DestroyRenderPass(scene_renderpass);
     }
     blast::GfxTextureDesc texture_desc = {};
     texture_desc.width = width;
     texture_desc.height = height;
-    texture_desc.sample_count = blast::SAMPLE_COUNT_1;
+    texture_desc.sample_count = g_sample_count;
     texture_desc.format = blast::FORMAT_R8G8B8A8_UNORM;
     texture_desc.mem_usage = blast::MEMORY_USAGE_GPU_ONLY;
     texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_RENDER_TARGET;
@@ -834,6 +858,12 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
     texture_desc.clear.depthstencil.depth = 1.0f;
     scene_color_tex = g_device->CreateTexture(texture_desc);
 
+    if (g_sample_count != blast::SAMPLE_COUNT_1) {
+        texture_desc.sample_count = blast::SAMPLE_COUNT_1;
+        resolve_tex = g_device->CreateTexture(texture_desc);
+    }
+
+    texture_desc.sample_count = g_sample_count;
     texture_desc.format = blast::FORMAT_D24_UNORM_S8_UINT;
     texture_desc.res_usage = blast::RESOURCE_USAGE_SHADER_RESOURCE | blast::RESOURCE_USAGE_DEPTH_STENCIL;
     scene_depth_tex = g_device->CreateTexture(texture_desc);
@@ -848,6 +878,10 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
                     blast::STORE_STORE
             )
     );
+
+    if (g_sample_count != blast::SAMPLE_COUNT_1) {
+        renderpass_desc.attachments.push_back(blast::RenderPassAttachment::Resolve(resolve_tex));
+    }
     scene_renderpass = g_device->CreateRenderPass(renderpass_desc);
 
     blast::GfxSwapChainDesc swapchain_desc;
@@ -935,6 +969,7 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
         pipeline_desc.rs = &rasterizer_state;
         pipeline_desc.dss = &depth_stencil_state;
         pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_TRI_LIST;
+        pipeline_desc.sample_count = g_sample_count;
         scene_pipeline = g_device->CreatePipeline(pipeline_desc);
     }
 
