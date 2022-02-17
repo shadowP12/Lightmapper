@@ -61,8 +61,13 @@ layout(push_constant) uniform BakeParams {
     ivec2 atlas_size;
     float bias;
     uint ray_count;
+    uint ray_count_per_iteration;
     uint light_count;
     uint grid_size;
+    uint offset_x;
+    uint offset_y;
+    uint max_iterations;
+    uint current_iterations;
 } params;
 
 bool RayHitTriangle(vec3 from, vec3 dir, float max_dist, vec3 p0, vec3 p1, vec3 p2, out float r_distance, out vec3 r_barycentric) {

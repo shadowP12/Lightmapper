@@ -12,6 +12,23 @@ layout(location = 3) in vec3 v_normal;
 
 layout(location = 0) out vec4 out_color;
 
+vec3 GetLightMapData(float layer) {
+    vec2 size = vec2(textureSize(sampler2DArray(sh_light_map, linear_sampler), 0));
+    vec2 texel_size = vec2(1.0) / size;
+
+    vec3 lm = vec3(0.0);
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(0.0, 0.0), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(texel_size.x, 0.0), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(-texel_size.x, 0.0), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(0.0, texel_size.y), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(0.0, -texel_size.y), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(texel_size.x, texel_size.y), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(texel_size.x, -texel_size.y), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(-texel_size.x, texel_size.y), layer)).rgb;
+    lm += texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1 + vec2(-texel_size.x, -texel_size.y), layer)).rgb;
+    return lm / 9.0;
+}
+
 void main()
 {
     vec3 lm_light_l0 = texture(sampler2DArray(sh_light_map, linear_sampler), vec3(v_uv1, 0.0)).rgb;
