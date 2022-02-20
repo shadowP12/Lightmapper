@@ -24,9 +24,29 @@ Model::~Model() {
     SAFE_DELETE_ARRAY(index_data);
 }
 
+void Model::ResetPositionData(uint8_t* position_data) {
+    SAFE_DELETE_ARRAY(this->position_data);
+    this->position_data = position_data;
+}
+
+void Model::ResetNormalData(uint8_t* normal_data) {
+    SAFE_DELETE_ARRAY(this->normal_data);
+    this->normal_data = normal_data;
+}
+
+void Model::ResetUV0Data(uint8_t* uv0_data) {
+    SAFE_DELETE_ARRAY(this->uv0_data);
+    this->uv0_data = uv0_data;
+}
+
 void Model::ResetUV1Data(uint8_t* uv1_data) {
     SAFE_DELETE_ARRAY(this->uv1_data);
     this->uv1_data = uv1_data;
+}
+
+void Model::ResetIndexData(uint8_t* index_data) {
+    SAFE_DELETE_ARRAY(this->index_data);
+    this->index_data = index_data;
 }
 
 void Model::GenerateGPUResource(blast::GfxDevice* device) {

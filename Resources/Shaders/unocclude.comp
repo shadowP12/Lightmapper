@@ -1,0 +1,190 @@
+#version 450 core
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+struct Vertex {
+    vec4 position;
+    vec4 normal;
+    vec2 uv0;
+    vec2 uv1;
+};
+
+layout(set = 0, binding = 2000, std430) restrict readonly buffer Vertices {
+    Vertex data[];
+} vertices;
+
+struct Triangle {
+    uvec4 indices;
+    vec4 min_bounds;
+    vec4 max_bounds;
+};
+
+layout(set = 0, binding = 2001, std430) restrict readonly buffer Triangles {
+    Triangle data[];
+} triangles;
+
+layout(set = 0, binding = 2002, std430) restrict readonly buffer GridIndices {
+    uint data[];
+} grid_indices;
+
+layout(binding = 1000) uniform utexture3D grid_texture;
+layout(binding = 2003, rgba32f) uniform restrict image2D position_texture;
+layout(binding = 2004, rgba32f) uniform restrict readonly image2D unocclude_texture;
+layout(binding = 3000) uniform sampler nearest_sampler;
+
+layout(push_constant) uniform BakeParams {
+    vec4 bound_size;
+    vec4 to_cell_offset;
+    vec4 to_cell_size;
+    ivec2 atlas_size;
+    float bias;
+    uint ray_count;
+    uint ray_count_per_iteration;
+    uint light_count;
+    uint grid_size;
+    uint offset_x;
+    uint offset_y;
+    uint max_iterations;
+    uint current_iterations;
+} params;
+
+bool RayHitTriangle(vec3 from, vec3 dir, float max_dist, vec3 p0, vec3 p1, vec3 p2, out float r_distance, out vec3 r_barycentric) {
+    const float EPSILON = 0.00001;
+    const vec3 e0 = p1 - p0;
+    const vec3 e1 = p0 - p2;
+    vec3 triangle_normal = cross(e1, e0);
+
+    float n_dot_dir = dot(triangle_normal, dir);
+
+    if (abs(n_dot_dir) < EPSILON) {
+        return false;
+    }
+
+    const vec3 e2 = (p0 - from) / n_dot_dir;
+    const vec3 i = cross(dir, e2);
+
+    r_barycentric.y = dot(i, e1);
+    r_barycentric.z = dot(i, e0);
+    r_barycentric.x = 1.0 - (r_barycentric.z + r_barycentric.y);
+    r_distance = dot(triangle_normal, e2);
+
+    return (r_distance > 0.0) && (r_distance < max_dist) && all(greaterThanEqual(r_barycentric, vec3(0.0)));
+}
+
+const uint RAY_MISS = 0;
+const uint RAY_FRONT = 1;
+const uint RAY_BACK = 2;
+const uint RAY_ANY = 3;
+
+uint TraceRay(vec3 p_from, vec3 p_to, out float r_distance, out vec3 r_normal) {
+    vec3 rel = p_to - p_from;
+    float rel_len = length(rel);
+    vec3 dir = normalize(rel);
+    vec3 inv_dir = 1.0 / dir;
+    vec3 from_cell = (p_from - params.to_cell_offset.xyz) * params.to_cell_size.xyz;
+    vec3 to_cell = (p_to - params.to_cell_offset.xyz) * params.to_cell_size.xyz;
+    vec3 rel_cell = to_cell - from_cell;
+    ivec3 icell = ivec3(from_cell);
+    ivec3 iendcell = ivec3(to_cell);
+    vec3 dir_cell = normalize(rel_cell);
+    vec3 delta = min(abs(1.0 / dir_cell), params.grid_size);
+    ivec3 step = ivec3(sign(rel_cell));
+    vec3 side = (sign(rel_cell) * (vec3(icell) - from_cell) + (sign(rel_cell) * 0.5) + 0.5) * delta;
+
+    uint iters = 0;
+    while (all(greaterThanEqual(icell, ivec3(0))) && all(lessThan(icell, ivec3(params.grid_size))) && iters < 1000) {
+        uvec2 cell_data = texelFetch(usampler3D(grid_texture, nearest_sampler), icell, 0).xy;
+        if (cell_data.x > 0) {
+            uint hit = RAY_MISS;
+            float best_distance = 1e20;
+
+            for (uint i = 0; i < cell_data.x; i++) {
+                uint tidx = grid_indices.data[cell_data.y + i];
+
+                Triangle triangle = triangles.data[tidx];
+                vec3 t0 = (triangle.min_bounds.xyz - p_from) * inv_dir;
+                vec3 t1 = (triangle.max_bounds.xyz - p_from) * inv_dir;
+                vec3 tmin = min(t0, t1), tmax = max(t0, t1);
+
+                if (max(tmin.x, max(tmin.y, tmin.z)) > min(tmax.x, min(tmax.y, tmax.z))) {
+                    continue;
+                }
+
+                vec3 vtx0 = vertices.data[triangle.indices.x].position.xyz;
+                vec3 vtx1 = vertices.data[triangle.indices.y].position.xyz;
+                vec3 vtx2 = vertices.data[triangle.indices.z].position.xyz;
+                vec3 normal = normalize(cross((vtx0 - vtx1), (vtx0 - vtx2)));
+                bool backface = dot(normal, dir) >= 0.0;
+
+                float distance;
+                vec3 barycentric;
+                if (RayHitTriangle(p_from, dir, rel_len, vtx0, vtx1, vtx2, distance, barycentric)) {
+                    if (!backface) {
+                        distance = max(params.bias, distance - params.bias);
+                    }
+
+                    if (distance < best_distance) {
+                        hit = backface ? RAY_BACK : RAY_FRONT;
+                        best_distance = distance;
+                        r_distance = distance;
+                        r_normal = normal;
+                    }
+                }
+            }
+
+            if (hit != RAY_MISS) {
+                return hit;
+            }
+        }
+
+        if (icell == iendcell) {
+            break;
+        }
+
+        bvec3 mask = lessThanEqual(side.xyz, min(side.yzx, side.zxy));
+        side += vec3(mask) * delta;
+        icell += ivec3(vec3(mask)) * step;
+
+        iters++;
+    }
+
+    return RAY_MISS;
+}
+
+void main() {
+    ivec2 atlas_pos = ivec2(gl_GlobalInvocationID.xy);
+    vec4 position_alpha = imageLoad(position_texture, ivec2(atlas_pos));
+    if (position_alpha.a < 0.5) {
+        return;
+    }
+
+    vec3 vertex_pos = position_alpha.xyz;
+    vec4 normal_tsize = imageLoad(unocclude_texture, ivec2(atlas_pos));
+
+    vec3 face_normal = normal_tsize.xyz;
+    float texel_size = normal_tsize.w;
+
+    vec3 v0 = abs(face_normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 tangent = normalize(cross(v0, face_normal));
+    vec3 bitangent = normalize(cross(tangent, face_normal));
+    vec3 base_pos = vertex_pos + face_normal * params.bias;
+
+    vec3 rays[4] = vec3[](tangent, bitangent, -tangent, -bitangent);
+    float min_d = 1e20;
+    for (int i = 0; i < 4; i++) {
+        vec3 ray_to = base_pos + rays[i] * texel_size * 1.0;
+        float d;
+        vec3 norm;
+
+        if (TraceRay(base_pos, ray_to, d, norm) == RAY_BACK) {
+            if (d < min_d) {
+                vertex_pos = base_pos + rays[i] * d + norm * params.bias * 1.0;
+                min_d = d;
+            }
+        }
+    }
+
+    position_alpha.xyz = vertex_pos;
+
+    imageStore(position_texture, ivec2(atlas_pos), position_alpha);
+}

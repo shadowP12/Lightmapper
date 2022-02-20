@@ -44,7 +44,7 @@ void main()
     vertex_interp = vertices.data[vertex_idx].position.xyz;
     uv_interp = vertices.data[vertex_idx].uv1;
     normal_interp = vertices.data[vertex_idx].normal.xyz;
-    face_normal = -normalize(cross((vertices.data[vertex_indices.x].position.xyz - vertices.data[vertex_indices.y].position.xyz), (vertices.data[vertex_indices.x].position.xyz - vertices.data[vertex_indices.z].position.xyz)));
+    face_normal = normalize(cross((vertices.data[vertex_indices.x].position.xyz - vertices.data[vertex_indices.y].position.xyz), (vertices.data[vertex_indices.x].position.xyz - vertices.data[vertex_indices.z].position.xyz)));
 
     gl_Position = vec4((vertices.data[vertex_idx].uv1) * 2.0 - 1.0, 0.0001, 1.0);
 }

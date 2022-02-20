@@ -33,13 +33,19 @@ public:
 
     uint8_t* GetPositionData() { return position_data; }
 
+    void ResetPositionData(uint8_t* position_data);
+
     void SetNormalData(uint8_t* normal_data) { this->normal_data = normal_data; }
 
     uint8_t* GetNormalData() { return normal_data; }
 
+    void ResetNormalData(uint8_t* normal_data);
+
     void SetUV0Data(uint8_t* uv0_data) { this->uv0_data = uv0_data; }
 
     uint8_t* GetUV0Data() { return uv0_data; }
+
+    void ResetUV0Data(uint8_t* uv0_data);
 
     void SetUV1Data(uint8_t* uv1_data) { this->uv1_data = uv1_data; }
 
@@ -50,6 +56,8 @@ public:
     void SetIndexData(uint8_t* index_data) { this->index_data = index_data; }
 
     uint8_t* GetIndexData() { return index_data; }
+
+    void ResetIndexData(uint8_t* index_data);
 
     void SetIndexType(blast::IndexType index_type) { this->index_type = index_type; }
 

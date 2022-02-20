@@ -75,6 +75,7 @@ blast::GfxShader* raster_frag_shader = nullptr;
 blast::GfxPipeline* raster_line_pipeline = nullptr;
 blast::GfxPipeline* raster_triangle_pipeline = nullptr;
 blast::GfxShader* clear_color_shader = nullptr;
+blast::GfxShader* unocclude_shader = nullptr;
 blast::GfxShader* direct_light_shader = nullptr;
 blast::GfxShader* bounce_light_shader = nullptr;
 blast::GfxShader* dilate_shader = nullptr;
@@ -192,23 +193,38 @@ int main() {
     {
         dilate_shader = CompileComputeShader(ProjectDir + "/Resources/Shaders/dilate.comp");
     }
+    {
+        unocclude_shader = CompileComputeShader(ProjectDir + "/Resources/Shaders/unocclude.comp");
+    }
 
     // 设置灯光
     std::vector<Light> lights;
     Light dir_lit;
     dir_lit.position = glm::vec3(0.0f, 100.0f, 0.0f);
     dir_lit.type = LIGHT_TYPE_DIRECTIONAL;
-    dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 10.0f);
+    dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, -0.3f, 3.0f);
     dir_lit.color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
     //lights.push_back(dir_lit);
 
     Light point_lit;
-    point_lit.position = glm::vec3(5.0f, 10.0f, 0.0f);
+    point_lit.position = glm::vec3(0.7f, 1.0f, -0.2f);
     point_lit.type = LIGHT_TYPE_OMNI;
-    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 100.0f);
-    point_lit.color = glm::vec4(0.3f, 0.2f, 0.8f, 1.0f);
-    point_lit.range = 20.0f;
-    point_lit.attenuation = 1.0f;
+    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 1.0f);
+    point_lit.color = glm::vec4(0.3f, 0.8f, 0.3f, 1.0f);
+    point_lit.range = 0.8f;
+    point_lit.attenuation = 0.5f;
+    lights.push_back(point_lit);
+
+    point_lit.position = glm::vec3(-0.7f, 0.3f, 0.2f);
+    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 1.0f);
+    point_lit.color = glm::vec4(0.8f, 0.3f, 0.3f, 1.0f);
+    lights.push_back(point_lit);
+
+    point_lit.position = glm::vec3(0.0f, 1.5f, 0.0f);
+    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 2.5f);
+    point_lit.color = glm::vec4(0.9f, 0.9f, 0.9f, 1.0f);
+    point_lit.range = 2.0f;
+    point_lit.attenuation = 0.2f;
     lights.push_back(point_lit);
 
     // 加载场景资源
@@ -220,7 +236,7 @@ int main() {
     quad_model = builtin_scene[0];
     object_storages.push_back({});
 
-    std::vector<Model*> display_scene = ImportScene(ProjectDir + "/Resources/Scenes/test.gltf");
+    std::vector<Model*> display_scene = ImportScene(ProjectDir + "/Resources/Scenes/CornellBox.gltf");
 
     // 生成atlas并为场景模型分配atlas uv
     xatlas::Atlas* atlas = xatlas::Create();
@@ -229,6 +245,10 @@ int main() {
         mesh_decl.vertexCount = display_scene[i]->GetVertexCount();
         mesh_decl.vertexPositionData = display_scene[i]->GetPositionData();
         mesh_decl.vertexPositionStride = sizeof(glm::vec3);
+        mesh_decl.vertexNormalData = display_scene[i]->GetNormalData();
+        mesh_decl.vertexNormalStride = sizeof(glm::vec3);
+        mesh_decl.vertexUvData = display_scene[i]->GetUV0Data();
+        mesh_decl.vertexUvStride = sizeof(glm::vec2);
         mesh_decl.indexData = display_scene[i]->GetIndexData();
         mesh_decl.indexCount = display_scene[i]->GetIndexCount();
         mesh_decl.indexFormat = display_scene[i]->GetIndexType() == blast::INDEX_TYPE_UINT16 ? xatlas::IndexFormat::UInt16 : xatlas::IndexFormat::UInt32;
@@ -237,24 +257,54 @@ int main() {
     xatlas::ChartOptions chartOptions;
     xatlas::PackOptions packOptions;
     packOptions.bilinear = false;
-    packOptions.texelsPerUnit = 32;
-    packOptions.resolution = 1024;
+    packOptions.padding = 4;
+//    packOptions.texelsPerUnit = 200;
+//    packOptions.resolution = 1024;
+    packOptions.blockAlign = true;
     xatlas::Generate(atlas, chartOptions, packOptions);
+
+    // Recreate VertexData IndexData
     for (uint32_t i = 0; i < atlas->meshCount; ++i) {
         xatlas::Mesh& atlas_mesh = atlas->meshes[i];
-        uint8_t* uv_data = new uint8_t[sizeof(glm::vec2) * atlas_mesh.vertexCount];
-        float* uvs = (float*)uv_data;
+        glm::vec3* old_position_data = (glm::vec3*)display_scene[i]->GetPositionData();
+        glm::vec3* old_normal_data = (glm::vec3*)display_scene[i]->GetNormalData();
+        glm::vec2* old_uv0_data = (glm::vec2*)display_scene[i]->GetUV0Data();
+
+        float* position_data = new float[3 * atlas_mesh.vertexCount];
+        float* normal_data = new float[3 * atlas_mesh.vertexCount];
+        float* uv0_data = new float[2 * atlas_mesh.vertexCount];
+        float* uv1_data = new float[2 * atlas_mesh.vertexCount];
         for (uint32_t j = 0; j < atlas_mesh.vertexCount; ++j) {
             uint32_t xref = atlas_mesh.vertexArray[j].xref;
-            uvs[xref * 2] = atlas_mesh.vertexArray[j].uv[0] / atlas->width;
-            uvs[xref * 2 + 1] = atlas_mesh.vertexArray[j].uv[1] / atlas->height;
-            //printf("%d\n", atlas_mesh.vertexArray[j].xref);
+
+            position_data[j * 3] = old_position_data[xref].x;
+            position_data[j * 3 + 1] = old_position_data[xref].y;
+            position_data[j * 3 + 2] = old_position_data[xref].z;
+
+            normal_data[j * 3] = old_normal_data[xref].x;
+            normal_data[j * 3 + 1] = old_normal_data[xref].y;
+            normal_data[j * 3 + 2] = old_normal_data[xref].z;
+
+            uv0_data[j * 2] = old_uv0_data[xref].x;
+            uv0_data[j * 2 + 1] = old_uv0_data[xref].y;
+
+            uv1_data[j * 2] = atlas_mesh.vertexArray[j].uv[0] / atlas->width;
+            uv1_data[j * 2 + 1] = atlas_mesh.vertexArray[j].uv[1] / atlas->height;
         }
-        for (int j = 0; j < display_scene[i]->GetVertexCount(); ++j) {
-//            printf("x  %f\n", uvs[j*2]);
-//            printf("y  %f\n", uvs[j*2+1]);
+
+        uint32_t* index_data = new uint32_t [atlas_mesh.indexCount];
+        for (uint32_t j = 0; j < atlas_mesh.indexCount; ++j) {
+            index_data[j] = atlas_mesh.indexArray[j];
         }
-        display_scene[i]->ResetUV1Data(uv_data);
+
+        display_scene[i]->SetVertexCount(atlas_mesh.vertexCount);
+        display_scene[i]->ResetPositionData((uint8_t*)position_data);
+        display_scene[i]->ResetNormalData((uint8_t*)normal_data);
+        display_scene[i]->ResetUV0Data((uint8_t*)uv0_data);
+        display_scene[i]->ResetUV1Data((uint8_t*)uv1_data);
+        display_scene[i]->ResetIndexData((uint8_t*)index_data);
+        display_scene[i]->SetIndexCount(atlas_mesh.indexCount);
+        display_scene[i]->SetIndexType(blast::INDEX_TYPE_UINT32);
     }
 
     // 设置光照贴图参数
@@ -262,11 +312,11 @@ int main() {
         lightmap_param.width = atlas->width;
         lightmap_param.height = atlas->height;
         // 每纹素追踪的光线数量
-        lightmap_param.ray_count_per_texel = 2048;
+        lightmap_param.ray_count_per_texel = 512;
         lightmap_param.max_region_size = 256;
         lightmap_param.x_regions = (atlas->width - 1) / lightmap_param.max_region_size + 1;
         lightmap_param.y_regions = (atlas->height - 1) / lightmap_param.max_region_size + 1;
-        lightmap_param.ray_iterations = 64;
+        lightmap_param.ray_iterations = 32;
         lightmap_param.ray_count_per_iteration = lightmap_param.ray_count_per_texel / lightmap_param.ray_iterations;
         lightmap_param.bounces = 1;
     }
@@ -384,12 +434,6 @@ int main() {
 
     // LightMap
     {
-
-//        blast::GfxBufferBarrier buffer_barrier = {};
-//        buffer_barrier.buffer = light_buffer;
-//        buffer_barrier.new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
-//        g_device->SetBarrier(copy_cmd, 1, &buffer_barrier, 0, nullptr);
-
         blast::GfxTextureDesc texture_desc;
         texture_desc.width = lightmap_param.width;
         texture_desc.height = lightmap_param.height;
@@ -530,6 +574,37 @@ int main() {
 
             g_device->Dispatch(cmd, std::max(1u, (uint32_t)(lightmap_param.width) / 16), std::max(1u, (uint32_t)(lightmap_param.height) / 16), 1);
 
+            // unocclude step
+            texture_barriers[0].texture = unocclude_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+            texture_barriers[1].texture = position_tex;
+            texture_barriers[1].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
+            g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
+
+            g_device->BindComputeShader(cmd, unocclude_shader);
+
+            g_device->BindUAV(cmd, vertex_buffer, 0);
+
+            g_device->BindUAV(cmd, triangle_buffer, 1);
+
+            g_device->BindUAV(cmd, triangle_index_buffer, 2);
+
+            g_device->BindUAV(cmd, position_tex, 3);
+
+            g_device->BindUAV(cmd, unocclude_tex, 4);
+
+            g_device->BindSampler(cmd, nearest_sampler, 0);
+
+            g_device->BindResource(cmd, grid_tex, 0);
+
+            g_device->PushConstants(cmd, &bake_param, sizeof(BakeParam));
+
+            g_device->Dispatch(cmd, std::max(1u, (uint32_t)(lightmap_param.width) / 16), std::max(1u, (uint32_t)(lightmap_param.height) / 16), 1);
+
+            texture_barriers[0].texture = position_tex;
+            texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
+            g_device->SetBarrier(cmd, 0, nullptr, 1, texture_barriers);
+
             // direct step
             texture_barriers[0].texture = source_light_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
@@ -565,9 +640,7 @@ int main() {
 
             texture_barriers[0].texture = source_light_tex;
             texture_barriers[0].new_state = blast::RESOURCE_STATE_SHADER_RESOURCE;
-            texture_barriers[1].texture = unocclude_tex;
-            texture_barriers[1].new_state = blast::RESOURCE_STATE_UNORDERED_ACCESS;
-            g_device->SetBarrier(cmd, 0, nullptr, 2, texture_barriers);
+            g_device->SetBarrier(cmd, 0, nullptr, 1, texture_barriers);
         }
 
         if (bake_prepared && !bake_completed) {
@@ -854,6 +927,7 @@ int main() {
     g_device->DestroyShader(direct_light_shader);
     g_device->DestroyShader(bounce_light_shader);
     g_device->DestroyShader(dilate_shader);
+    g_device->DestroyShader(unocclude_shader);
 
     // 清除光栅化RenderPass资源
     g_device->DestroyTexture(position_tex);
@@ -1071,10 +1145,13 @@ void RefreshSwapchain(void* window, uint32_t width, uint32_t height) {
         pipeline_desc.bs = &blend_state;
         pipeline_desc.rs = &rasterizer_state;
         pipeline_desc.dss = &depth_stencil_state;
-        pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_LINE_LIST;
-        raster_line_pipeline = g_device->CreatePipeline(pipeline_desc);
         pipeline_desc.primitive_topo = blast::PRIMITIVE_TOPO_TRI_LIST;
         raster_triangle_pipeline = g_device->CreatePipeline(pipeline_desc);
+
+        blast::GfxRasterizerState wireframe_rasterizer_state = rasterizer_state;
+        wireframe_rasterizer_state.fill_mode = blast::FILL_WIREFRAME;
+        pipeline_desc.rs = &wireframe_rasterizer_state;
+        raster_line_pipeline = g_device->CreatePipeline(pipeline_desc);
     }
 }
 
