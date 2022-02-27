@@ -78,7 +78,7 @@
             ],
             "translation" : [
                 0,
-                0.7099999785423279,
+                1,
                 0
             ]
         }
@@ -147,20 +147,6 @@
                     1
                 ],
                 "metallicFactor" : 0
-            }
-        },
-        {
-            "doubleSided" : true,
-            "name" : "Material.001",
-            "pbrMetallicRoughness" : {
-                "baseColorFactor" : [
-                    0.800000011920929,
-                    0.800000011920929,
-                    0.800000011920929,
-                    1
-                ],
-                "metallicFactor" : 0,
-                "roughnessFactor" : 0.5
             }
         }
     ],
@@ -237,10 +223,10 @@
                     "attributes" : {
                         "POSITION" : 12,
                         "NORMAL" : 13,
-                        "TEXCOORD_0" : 14
+                        "TANGENT" : 14,
+                        "TEXCOORD_0" : 15
                     },
-                    "indices" : 15,
-                    "material" : 5
+                    "indices" : 16
                 }
             ]
         }
@@ -371,7 +357,7 @@
         {
             "bufferView" : 12,
             "componentType" : 5126,
-            "count" : 1984,
+            "count" : 1966,
             "max" : [
                 1.3671875,
                 0.984375,
@@ -387,17 +373,23 @@
         {
             "bufferView" : 13,
             "componentType" : 5126,
-            "count" : 1984,
+            "count" : 1966,
             "type" : "VEC3"
         },
         {
             "bufferView" : 14,
             "componentType" : 5126,
-            "count" : 1984,
-            "type" : "VEC2"
+            "count" : 1966,
+            "type" : "VEC4"
         },
         {
             "bufferView" : 15,
+            "componentType" : 5126,
+            "count" : 1966,
+            "type" : "VEC2"
+        },
+        {
+            "bufferView" : 16,
             "componentType" : 5123,
             "count" : 2904,
             "type" : "SCALAR"
@@ -466,28 +458,33 @@
         },
         {
             "buffer" : 0,
-            "byteLength" : 23808,
+            "byteLength" : 23592,
             "byteOffset" : 552
         },
         {
             "buffer" : 0,
-            "byteLength" : 23808,
-            "byteOffset" : 24360
+            "byteLength" : 23592,
+            "byteOffset" : 24144
         },
         {
             "buffer" : 0,
-            "byteLength" : 15872,
-            "byteOffset" : 48168
+            "byteLength" : 31456,
+            "byteOffset" : 47736
+        },
+        {
+            "buffer" : 0,
+            "byteLength" : 15728,
+            "byteOffset" : 79192
         },
         {
             "buffer" : 0,
             "byteLength" : 5808,
-            "byteOffset" : 64040
+            "byteOffset" : 94920
         }
     ],
     "buffers" : [
         {
-            "byteLength" : 69848,
+            "byteLength" : 100728,
             "uri" : "CornellBox.bin"
         }
     ]

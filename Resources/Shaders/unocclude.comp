@@ -120,7 +120,7 @@ uint TraceRay(vec3 p_from, vec3 p_to, out float r_distance, out vec3 r_normal) {
                 vec3 barycentric;
                 if (RayHitTriangle(p_from, dir, rel_len, vtx0, vtx1, vtx2, distance, barycentric)) {
                     if (!backface) {
-                        distance = max(params.bias, distance - params.bias);
+                        //distance = max(params.bias, distance - params.bias);
                     }
 
                     if (distance < best_distance) {
@@ -178,7 +178,7 @@ void main() {
 
         if (TraceRay(base_pos, ray_to, d, norm) == RAY_BACK) {
             if (d < min_d) {
-                vertex_pos = base_pos + rays[i] * d + norm * params.bias * 1.0;
+                vertex_pos = base_pos + rays[i] * d + norm * params.bias * 10.0;
                 min_d = d;
             }
         }

@@ -199,8 +199,8 @@ static bool first_debug = true;
 void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_offset, const AABB& bounds, const glm::vec3 points[3], uint32_t triangle_index, std::vector<TriangleSort>& triangles) {
     if (first_debug) {
         glm::vec3 bbox_size = bounds.GetSize();
-        printf("bbox pos:  %f   %f   %f\n", bounds.min.x, bounds.min.y, bounds.min.z);
-        printf("bbox size:  %f   %f   %f\n", bbox_size.x, bbox_size.y, bbox_size.z);
+        //printf("bbox pos:  %f   %f   %f\n", bounds.min.x, bounds.min.y, bounds.min.z);
+        //printf("bbox size:  %f   %f   %f\n", bbox_size.x, bbox_size.y, bbox_size.z);
     }
 
     int half_size = grid_size / 2;
@@ -232,7 +232,7 @@ void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_off
 
         if (half_size == 1) {
             if (first_debug) {
-                printf("final %d   %d    %d\n", n.x, n.y, n.z);
+                //printf("final %d   %d    %d\n", n.x, n.y, n.z);
             }
             TriangleSort ts;
             ts.cell_index = n.x + (n.y * MAX_GRID_SIZE) + (n.z * MAX_GRID_SIZE * MAX_GRID_SIZE);
@@ -240,7 +240,7 @@ void PlotTriangleIntoTriangleIndexList(int grid_size, const glm::ivec3& grid_off
             triangles.push_back(ts);
         } else {
             if (first_debug) {
-                printf("sub %d   %d    %d\n", n.x, n.y, n.z);
+                //printf("sub %d   %d    %d\n", n.x, n.y, n.z);
             }
             AABB aabb;
             aabb.min = aabb_position;

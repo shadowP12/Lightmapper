@@ -186,8 +186,11 @@ vec2 Hammersley(uint i, uint N) {
     return vec2((float(i) / float(N)), RadicalInverse_VdC(i));
 }
 
-vec3 GenerateHemisphereDirection(uint i, uint N) {
+vec3 GenerateHemisphereDirection(uint i, uint N, vec2 offset) {
     vec2 Xi = Hammersley(i, N);
+
+    Xi.x = fract(Xi.x + offset.x);
+    Xi.y = fract(Xi.y + offset.y);
 
     float noise1 = Xi.x;//Randomize(noise);
     float noise2 = Xi.y * 2.0 * PI;//Randomize(noise) * 2.0 * PI;
@@ -205,11 +208,13 @@ vec3 GenerateHemisphereDirectionV2(uint noise) {
 void main() {
     ivec2 atlas_pos = ivec2(gl_GlobalInvocationID.xy) + ivec2(params.offset_x, params.offset_y);
 
-    vec3 normal = texelFetch(sampler2D(normal_texture, nearest_sampler), atlas_pos, 0).xyz;
-    if (length(normal) < 0.5) {
+    vec3 normal = texelFetch(sampler2D(normal_texture, linear_sampler), atlas_pos, 0).xyz;
+    if (length(normal) < 0.3) {
         return;
     }
-    vec3 position = texelFetch(sampler2D(position_texture, nearest_sampler), atlas_pos, 0).xyz;
+
+    vec3 position = texelFetch(sampler2D(position_texture, linear_sampler), atlas_pos, 0).xyz;
+    position += sign(normal) * abs(position * 0.0002);
 
     vec3 v0 = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
     vec3 tangent = normalize(cross(v0, normal));
@@ -239,23 +244,32 @@ void main() {
         active_rays += accum.a;
     }
 
+    uint miss_count = 0;
+
     uint noise = RandomSeed(ivec3(atlas_pos, 0));
     for (uint i = 0; i < params.ray_count_per_iteration; i++) {
-        vec3 ray_dir = normal_mat * GenerateHemisphereDirection(uint(i) + (params.ray_count_per_iteration * params.current_iterations), uint(params.ray_count));
+        vec2 random_offset = vec2(Randomize(noise), Randomize(noise));
+        random_offset *= 0.00f;
+        vec3 ray_dir = normal_mat * GenerateHemisphereDirection(uint(i) + (params.ray_count_per_iteration * params.current_iterations), uint(params.ray_count), random_offset);
         uint tidx;
         vec3 barycentric;
         vec3 light = vec3(0.0);
-        uint trace_result = TraceRay(position + ray_dir * params.bias * 1.0, position + ray_dir * length(params.bound_size.xyz), tidx, barycentric);
+        uint trace_result = TraceRay(position + ray_dir, position + ray_dir * length(params.bound_size.xyz), tidx, barycentric);
         if (trace_result == RAY_FRONT) {
             vec2 uv0 = vertices.data[triangles.data[tidx].indices.x].uv1;
             vec2 uv1 = vertices.data[triangles.data[tidx].indices.y].uv1;
             vec2 uv2 = vertices.data[triangles.data[tidx].indices.z].uv1;
             vec2 uv = barycentric.x * uv0 + barycentric.y * uv1 + barycentric.z * uv2;
             light = texture(sampler2D(source_light_texture, linear_sampler), uv).rgb;
+
             active_rays += 1.0;
+        } else if (trace_result == RAY_BACK) {
+            miss_count++;
+            continue;
         } else if (trace_result == RAY_MISS) {
             // todo: env light
-            active_rays += 1.0;
+            miss_count++;
+            continue;
         }
 
         light_average += light;
@@ -272,6 +286,11 @@ void main() {
         }
     }
 
+    imageStore(sh_light_map, ivec3(atlas_pos, 0), sh_accum[0]);
+    imageStore(sh_light_map, ivec3(atlas_pos, 1), sh_accum[1]);
+    imageStore(sh_light_map, ivec3(atlas_pos, 2), sh_accum[2]);
+    imageStore(sh_light_map, ivec3(atlas_pos, 3), sh_accum[3]);
+
     light_total += light_average;
 
     if (params.current_iterations == params.max_iterations - 1) {
@@ -279,12 +298,11 @@ void main() {
             light_total /= active_rays;
         }
         imageStore(dest_light_texture, ivec2(atlas_pos), vec4(light_total, 1.0));
+
+        vec4 accum = imageLoad(sh_light_map, ivec3(atlas_pos, 0));
+        accum.rgb += light_total;
+        imageStore(sh_light_map, ivec3(atlas_pos, 0), accum);
     } else {
         imageStore(bounce_accum_texture, ivec2(atlas_pos), vec4(light_total, active_rays));
     }
-
-    imageStore(sh_light_map, ivec3(atlas_pos, 0), sh_accum[0]);
-    imageStore(sh_light_map, ivec3(atlas_pos, 1), sh_accum[1]);
-    imageStore(sh_light_map, ivec3(atlas_pos, 2), sh_accum[2]);
-    imageStore(sh_light_map, ivec3(atlas_pos, 3), sh_accum[3]);
 }

@@ -11,39 +11,39 @@ vec4 Dilate(uint id)
     ivec2 atlas_pos = ivec2(gl_GlobalInvocationID.xy);
     vec4 c = texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos, id), 0);
     //sides first, as they are closer
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, 0), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, 1), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, 0), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, -1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, 0), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, 1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, 0), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, -1), id), 0);
 
     //endpoints second
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, -1), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, 1), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, -1), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, 1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, -1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, 1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, -1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, 1), id), 0);
 
     //far sides third
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, 0), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, 2), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, 0), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, -2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, 0), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, 2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, 0), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(0, -2), id), 0);
 
     //far-mid endpoints
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, -1), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, 1), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, -1), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, 1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, -1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, 1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, -1), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, 1), id), 0);
 
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, -2), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, 2), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, -2), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, 2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, -2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-1, 2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, -2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(1, 2), id), 0);
 
     //far endpoints
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, -2), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, 2), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, -2), id), 0);
-    c = c.a > 0.5 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, 2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, -2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(-2, 2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, -2), id), 0);
+    c = c.a > 0.0 ? c : texelFetch(sampler2DArray(source_texture, linear_sampler), ivec3(atlas_pos + ivec2(2, 2), id), 0);
     
     return c;
 }

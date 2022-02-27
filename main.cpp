@@ -156,6 +156,11 @@ struct BakeParam {
     uint32_t current_iterations;
 } bake_param;
 
+struct RasterParam {
+    glm::vec2 atlas_size;
+    glm::vec2 uv_offset;
+} raster_param;
+
 struct ClearParam {
     glm::vec4 clear_color;
 } clear_param;
@@ -202,29 +207,29 @@ int main() {
     Light dir_lit;
     dir_lit.position = glm::vec3(0.0f, 100.0f, 0.0f);
     dir_lit.type = LIGHT_TYPE_DIRECTIONAL;
-    dir_lit.direction_energy = glm::vec4(0.0f, -1.0f, -0.3f, 3.0f);
+    dir_lit.direction_energy = glm::vec4(-0.0f, 0.0f, -1.0f, 2.0f);
     dir_lit.color = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
-    //lights.push_back(dir_lit);
+    lights.push_back(dir_lit);
 
     Light point_lit;
-    point_lit.position = glm::vec3(0.7f, 1.0f, -0.2f);
+    point_lit.position = glm::vec3(0.5f, 1.0f, -0.2f);
     point_lit.type = LIGHT_TYPE_OMNI;
-    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 1.0f);
+    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 1.5f);
     point_lit.color = glm::vec4(0.3f, 0.8f, 0.3f, 1.0f);
-    point_lit.range = 0.8f;
-    point_lit.attenuation = 0.5f;
-    lights.push_back(point_lit);
-
-    point_lit.position = glm::vec3(-0.7f, 0.3f, 0.2f);
-    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 1.0f);
-    point_lit.color = glm::vec4(0.8f, 0.3f, 0.3f, 1.0f);
-    lights.push_back(point_lit);
-
-    point_lit.position = glm::vec3(0.0f, 1.5f, 0.0f);
-    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 2.5f);
-    point_lit.color = glm::vec4(0.9f, 0.9f, 0.9f, 1.0f);
-    point_lit.range = 2.0f;
+    point_lit.range = 1.5f;
     point_lit.attenuation = 0.2f;
+    lights.push_back(point_lit);
+
+    point_lit.position = glm::vec3(-0.5f, 0.3f, 0.2f);
+    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 0.5f);
+    point_lit.color = glm::vec4(0.9f, 0.0f, 0.3f, 1.0f);
+    lights.push_back(point_lit);
+
+    point_lit.position = glm::vec3(0.0f, 1.3f, 0.0f);
+    point_lit.direction_energy = glm::vec4(0.0f, -1.0f, 0.5f, 3.5f);
+    point_lit.color = glm::vec4(0.9f, 0.9f, 0.9f, 1.0f);
+    point_lit.range = 1.5f;
+    point_lit.attenuation = 0.1f;
     lights.push_back(point_lit);
 
     // 加载场景资源
@@ -256,11 +261,10 @@ int main() {
     }
     xatlas::ChartOptions chartOptions;
     xatlas::PackOptions packOptions;
-    packOptions.bilinear = false;
+    packOptions.bilinear = true;
     packOptions.padding = 4;
-//    packOptions.texelsPerUnit = 200;
-//    packOptions.resolution = 1024;
-    packOptions.blockAlign = true;
+    packOptions.texelsPerUnit = 64;
+    packOptions.resolution = 512;
     xatlas::Generate(atlas, chartOptions, packOptions);
 
     // Recreate VertexData IndexData
@@ -313,10 +317,10 @@ int main() {
         lightmap_param.height = atlas->height;
         // 每纹素追踪的光线数量
         lightmap_param.ray_count_per_texel = 512;
-        lightmap_param.max_region_size = 256;
+        lightmap_param.max_region_size = 128;
         lightmap_param.x_regions = (atlas->width - 1) / lightmap_param.max_region_size + 1;
         lightmap_param.y_regions = (atlas->height - 1) / lightmap_param.max_region_size + 1;
-        lightmap_param.ray_iterations = 32;
+        lightmap_param.ray_iterations = 2;
         lightmap_param.ray_count_per_iteration = lightmap_param.ray_count_per_texel / lightmap_param.ray_iterations;
         lightmap_param.bounces = 1;
     }
@@ -486,6 +490,39 @@ int main() {
         if (!bake_prepared) {
             bake_prepared = true;
 
+            float uv_offsets[5 * 5 * 2] =
+                    {
+                            -2, -2,
+                            2, -2,
+                            -2, 2,
+                            2, 2,
+
+                            -1, -2,
+                            1, -2,
+                            -2, -1,
+                            2, -1,
+                            -2, 1,
+                            2, 1,
+                            -1, 2,
+                            1, 2,
+
+                            -2, 0,
+                            2, 0,
+                            0, -2,
+                            0, 2,
+
+                            -1, -1,
+                            1, -1,
+                            -1, 0,
+                            1, 0,
+                            -1, 1,
+                            1, 1,
+                            0, -1,
+                            0, 1,
+
+                            0, 0
+                    };
+
             // raster
             blast::GfxTextureBarrier texture_barriers[4];
             texture_barriers[0].texture = position_tex;
@@ -518,15 +555,21 @@ int main() {
 
             g_device->BindUAV(cmd, triangle_buffer, 1);
 
-            g_device->Draw(cmd, as->triangles.size() * 3, 0);
+            raster_param.atlas_size = glm::vec2(lightmap_param.width, lightmap_param.height);
+            for (int i = 0; i < 25; ++i) {
+                raster_param.uv_offset = glm::vec2(uv_offsets[i * 2], uv_offsets[i * 2 + 1]);
+                g_device->PushConstants(cmd, &raster_param, sizeof(RasterParam));
 
-            g_device->BindPipeline(cmd, raster_line_pipeline);
+                g_device->Draw(cmd, as->triangles.size() * 3, 0);
+            }
 
-            g_device->BindUAV(cmd, vertex_buffer, 0);
+//            g_device->BindPipeline(cmd, raster_line_pipeline);
+//
+//            g_device->BindUAV(cmd, vertex_buffer, 0);
+//
+//            g_device->BindUAV(cmd, triangle_buffer, 1);
 
-            g_device->BindUAV(cmd, triangle_buffer, 1);
-
-            g_device->Draw(cmd, as->triangles.size() * 3, 0);
+            //g_device->Draw(cmd, as->triangles.size() * 3, 0);
 
             g_device->RenderPassEnd(cmd);
 
@@ -549,7 +592,7 @@ int main() {
             bake_param.to_cell_size.y = (1.0f / as->bounds.GetSize().y) * float(MAX_GRID_SIZE);
             bake_param.to_cell_size.z = (1.0f / as->bounds.GetSize().z) * float(MAX_GRID_SIZE);
 
-            clear_param.clear_color = glm::vec4(0.0f);
+            clear_param.clear_color = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
             // clear step
             texture_barriers[0].texture = source_light_tex;
@@ -819,7 +862,11 @@ int main() {
 
                 g_device->BindResource(cmd, sh_light_map, 1);
 
+                g_device->BindResource(cmd, normal_tex, 2);
+
                 g_device->BindSampler(cmd, linear_sampler, 0);
+
+                g_device->BindSampler(cmd, nearest_sampler, 1);
 
                 g_device->BindConstantBuffer(cmd, object_ub, 0, sizeof(ObjectUniforms), (i + 1) * sizeof(ObjectUniforms));
 
