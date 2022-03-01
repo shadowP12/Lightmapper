@@ -68,6 +68,7 @@ layout(push_constant) uniform BakeParams {
     uint offset_y;
     uint max_iterations;
     uint current_iterations;
+    uint bounces;
 } params;
 
 bool RayHitTriangle(vec3 from, vec3 dir, float max_dist, vec3 p0, vec3 p1, vec3 p2, out float r_distance, out vec3 r_barycentric) {

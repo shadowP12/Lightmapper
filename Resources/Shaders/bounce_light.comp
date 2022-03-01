@@ -51,9 +51,35 @@ layout(push_constant) uniform BakeParams {
     uint offset_y;
     uint max_iterations;
     uint current_iterations;
+    uint bounces;
 } params;
 
+struct Interaction {
+    bool hit;
+    float hit_dist;
+    vec3 hit_position;
+    uint tri_idx;
+    vec3 barycentric;
+};
+
 const float PI = 3.14159265f;
+
+uvec4 seed;
+
+void InitRNG(vec2 p, int frame) {
+    seed = uvec4(p, uint(frame), uint(p.x) + uint(p.y));
+}
+
+void pcg4d(inout uvec4 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.w; v.y += v.z * v.x; v.z += v.x * v.y; v.w += v.y * v.z;
+    v = v ^ (v >> 16u);
+    v.x += v.y * v.w; v.y += v.z * v.x; v.z += v.x * v.y; v.w += v.y * v.z;
+}
+
+float Rand() {
+    pcg4d(seed); return float(seed.x) / float(0xffffffffu);
+}
 
 bool RayHitTriangle(vec3 from, vec3 dir, float max_dist, vec3 p0, vec3 p1, vec3 p2, out float r_distance, out vec3 r_barycentric) {
     const float EPSILON = 0.00001;
@@ -83,7 +109,7 @@ const uint RAY_FRONT = 1;
 const uint RAY_BACK = 2;
 const uint RAY_ANY = 3;
 
-uint TraceRay(vec3 p_from, vec3 p_to, out uint r_triangle, out vec3 r_barycentric) {
+uint TraceRay(vec3 p_from, vec3 p_to, out Interaction isect) {
     vec3 rel = p_to - p_from;
     float rel_len = length(rel);
     vec3 dir = normalize(rel);
@@ -134,11 +160,16 @@ uint TraceRay(vec3 p_from, vec3 p_to, out uint r_triangle, out vec3 r_barycentri
                     if (distance < best_distance) {
                         hit = backface ? RAY_BACK : RAY_FRONT;
                         best_distance = distance;
-                        r_triangle = tidx;
-                        r_barycentric = barycentric;
+                        isect.hit = true;
+                        isect.hit_dist = distance;
+                        // surface offset?
+                        isect.hit_position = p_to + dir * distance;
+                        isect.barycentric = barycentric;
+                        isect.tri_idx = tidx;
                     }
                 }
             }
+
             if (hit != RAY_MISS) {
                 return hit;
             }
@@ -155,22 +186,38 @@ uint TraceRay(vec3 p_from, vec3 p_to, out uint r_triangle, out vec3 r_barycentri
         iters++;
     }
 
+    isect.hit = false;
     return RAY_MISS;
 }
 
-uint Hash(uint value) {
-    uint state = value * 747796405u + 2891336453u;
-    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
+#define LIGHT_TYPE_DIRECTIONAL 0
+#define LIGHT_TYPE_OMNI 1
+#define LIGHT_TYPE_SPOT 2
+
+vec3 SampleOneLight(vec3 scatter_pos, uint light_index) {
+    return vec3(0.0);
 }
 
-uint RandomSeed(ivec3 seed) {
-    return Hash(uint(seed.x) ^ Hash(uint(seed.y) ^ Hash(seed.z)));
-}
+vec3 PathTrace(vec3 p_from, vec3 p_to) {
+    vec3 rel = p_to - p_from;
+    float ray_len = length(rel);
+    vec3 ray_dir = normalize(rel);
+    vec3 ray_origin = p_from;
 
-float Randomize(inout uint value) {
-    value = Hash(value);
-    return float(value / 4294967296.0);
+    vec3 beta = vec3(1.0);
+    vec3 radiance = vec3(0.0);
+
+    for(uint bounce = 0; bounce < params.bounces; bounce++) {
+
+
+        uint light_index = uint(Rand() * float(params.light_count));
+
+        SampleOneLight(p_from, light_index);
+
+        // RR
+
+    }
+    return vec3(0.0);
 }
 
 float RadicalInverse_VdC(uint bits) {
@@ -186,21 +233,11 @@ vec2 Hammersley(uint i, uint N) {
     return vec2((float(i) / float(N)), RadicalInverse_VdC(i));
 }
 
-vec3 GenerateHemisphereDirection(uint i, uint N, vec2 offset) {
+vec3 GenerateHemisphereDirection(uint i, uint N) {
     vec2 Xi = Hammersley(i, N);
 
-    Xi.x = fract(Xi.x + offset.x);
-    Xi.y = fract(Xi.y + offset.y);
-
-    float noise1 = Xi.x;//Randomize(noise);
-    float noise2 = Xi.y * 2.0 * PI;//Randomize(noise) * 2.0 * PI;
-
-    return vec3(sqrt(noise1) * cos(noise2), sqrt(noise1) * sin(noise2), sqrt(1.0 - noise1));
-}
-
-vec3 GenerateHemisphereDirectionV2(uint noise) {
-    float noise1 = Randomize(noise);
-    float noise2 = Randomize(noise) * 2.0 * PI;
+    float noise1 = Xi.x;
+    float noise2 = Xi.y * 2.0 * PI;
 
     return vec3(sqrt(noise1) * cos(noise2), sqrt(noise1) * sin(noise2), sqrt(1.0 - noise1));
 }
@@ -215,6 +252,8 @@ void main() {
 
     vec3 position = texelFetch(sampler2D(position_texture, linear_sampler), atlas_pos, 0).xyz;
     position += sign(normal) * abs(position * 0.0002);
+
+    InitRNG(atlas_pos, 0);
 
     vec3 v0 = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
     vec3 tangent = normalize(cross(v0, normal));
@@ -246,20 +285,18 @@ void main() {
 
     uint miss_count = 0;
 
-    uint noise = RandomSeed(ivec3(atlas_pos, 0));
     for (uint i = 0; i < params.ray_count_per_iteration; i++) {
-        vec2 random_offset = vec2(Randomize(noise), Randomize(noise));
+        vec2 random_offset = vec2(Rand(), Rand());
         random_offset *= 0.00f;
-        vec3 ray_dir = normal_mat * GenerateHemisphereDirection(uint(i) + (params.ray_count_per_iteration * params.current_iterations), uint(params.ray_count), random_offset);
-        uint tidx;
-        vec3 barycentric;
+        vec3 ray_dir = normal_mat * GenerateHemisphereDirection(uint(i) + (params.ray_count_per_iteration * params.current_iterations), uint(params.ray_count));
         vec3 light = vec3(0.0);
-        uint trace_result = TraceRay(position + ray_dir, position + ray_dir * length(params.bound_size.xyz), tidx, barycentric);
+        Interaction isect;
+        uint trace_result = TraceRay(position + ray_dir, position + ray_dir * length(params.bound_size.xyz), isect);
         if (trace_result == RAY_FRONT) {
-            vec2 uv0 = vertices.data[triangles.data[tidx].indices.x].uv1;
-            vec2 uv1 = vertices.data[triangles.data[tidx].indices.y].uv1;
-            vec2 uv2 = vertices.data[triangles.data[tidx].indices.z].uv1;
-            vec2 uv = barycentric.x * uv0 + barycentric.y * uv1 + barycentric.z * uv2;
+            vec2 uv0 = vertices.data[triangles.data[isect.tri_idx].indices.x].uv1;
+            vec2 uv1 = vertices.data[triangles.data[isect.tri_idx].indices.y].uv1;
+            vec2 uv2 = vertices.data[triangles.data[isect.tri_idx].indices.z].uv1;
+            vec2 uv = isect.barycentric.x * uv0 + isect.barycentric.y * uv1 + isect.barycentric.z * uv2;
             light = texture(sampler2D(source_light_texture, linear_sampler), uv).rgb;
 
             active_rays += 1.0;

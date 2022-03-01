@@ -137,7 +137,6 @@ struct LightmapParam {
     uint32_t ray_iterations;
     uint32_t ray_count_per_iteration;
     uint32_t bounces;
-
 } lightmap_param;
 
 struct BakeParam {
@@ -154,6 +153,7 @@ struct BakeParam {
     uint32_t offset_y;
     uint32_t max_iterations;
     uint32_t current_iterations;
+    uint32_t bounces;
 } bake_param;
 
 struct RasterParam {
