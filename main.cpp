@@ -725,6 +725,8 @@ int main() {
 
             g_device->BindUAV(cmd, triangle_index_buffer, 2);
 
+            g_device->BindUAV(cmd, light_buffer, 3);
+
             g_device->BindUAV(cmd, dest_light_tex, 4);
 
             g_device->BindUAV(cmd, sh_light_map, 5);

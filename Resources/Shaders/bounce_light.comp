@@ -27,6 +27,21 @@ layout(set = 0, binding = 2002, std430) restrict readonly buffer GridIndices {
     uint data[];
 } grid_indices;
 
+struct Light {
+    vec3 position;
+    uint type;
+    vec4 direction_energy;
+    vec4 color;
+    float range;
+    float attenuation;
+    float cos_spot_angle;
+    float inv_spot_attenuation;
+};
+
+layout(set = 0, binding = 2003, std430) restrict readonly buffer Lights {
+    Light data[];
+} lights;
+
 layout(binding = 1000) uniform texture2D position_texture;
 layout(binding = 1001) uniform texture2D normal_texture;
 layout(binding = 1002) uniform utexture3D grid_texture;
@@ -59,6 +74,8 @@ struct Interaction {
     float hit_dist;
     vec3 hit_position;
     uint tri_idx;
+    vec3 wo;
+    vec3 normal;
     vec3 barycentric;
 };
 
@@ -166,6 +183,8 @@ uint TraceRay(vec3 p_from, vec3 p_to, out Interaction isect) {
                         isect.hit_position = p_to + dir * distance;
                         isect.barycentric = barycentric;
                         isect.tri_idx = tidx;
+                        isect.normal = normal;
+                        isect.wo = normalize(-dir);
                     }
                 }
             }
@@ -194,8 +213,61 @@ uint TraceRay(vec3 p_from, vec3 p_to, out Interaction isect) {
 #define LIGHT_TYPE_OMNI 1
 #define LIGHT_TYPE_SPOT 2
 
-vec3 SampleOneLight(vec3 scatter_pos, uint light_index) {
-    return vec3(0.0);
+float GetOmniAttenuation(float distance, float inv_range, float decay) {
+    float nd = distance * inv_range;
+    nd *= nd;
+    nd *= nd;
+    nd = max(1.0 - nd, 0.0);
+    nd *= nd;
+    return nd * pow(max(distance, 0.0001), -decay);
+}
+
+vec3 SampleOneLight(Interaction isect, uint light_index) {
+    Light light = lights.data[light_index];
+    vec3 wi = isect.wo;
+    vec3 wo;
+    vec3 Li = vec3(0.0);
+    vec3 Ld = vec3(0.0);
+    // 目前所有的灯光pdf都为1
+    float light_pdf = 1.0;
+    if (light.type == LIGHT_TYPE_DIRECTIONAL) {
+        wi = -light.direction_energy.xyz;
+        Li = light.color.xyz * light.direction_energy.w;
+    } else {
+        wi = normalize(light.position - isect.hit_position);
+        float d = distance(isect.hit_position, light.position);
+        if (d > light.range) {
+            Li = vec3(0.0);
+        } else {
+            float attenuation = GetOmniAttenuation(d, 1.0 / light.range, light.attenuation);
+            Li = light.color.xyz * light.direction_energy.w * attenuation;
+        }
+    }
+
+    if (light_pdf != 0.0 && length(Li) > 0.0) {
+        // 默认使用Lambertian反射模型
+        vec3 bsdf_f = vec3(1.0) / PI;
+        float bsdf_pdf = abs(dot(wi, isect.normal)) * (1.0 / PI);
+
+        if (length(bsdf_f) > 0.0) {
+            Interaction shadow_isect;
+            TraceRay(isect.hit_position, isect.hit_position + wi * length(params.bound_size.xyz), shadow_isect);
+            if (!shadow_isect.hit) {
+                Ld += bsdf_f * Li / light_pdf;
+            }
+        }
+    }
+
+    return Ld;
+}
+
+vec3 CosineSampleHemisphere(float u1, float u2) {
+    float r = sqrt(u1);
+    float phi = 2.0 * PI * u2;
+    float x = r * cos(phi);
+    float y = r * sin(phi);
+    float z = sqrt(max(0.0, 1.0 - x*x - y*y));
+    return vec3(x, y, z);
 }
 
 vec3 PathTrace(vec3 p_from, vec3 p_to) {
@@ -208,16 +280,42 @@ vec3 PathTrace(vec3 p_from, vec3 p_to) {
     vec3 radiance = vec3(0.0);
 
     for(uint bounce = 0; bounce < params.bounces; bounce++) {
+        Interaction isect;
+        TraceRay(ray_origin, ray_origin + ray_dir * length(params.bound_size.xyz), isect);
 
+        if (!isect.hit) {
+            break;
+        }
 
         uint light_index = uint(Rand() * float(params.light_count));
+        vec3 Ld = SampleOneLight(isect, light_index);
+        radiance += beta * Ld;
 
-        SampleOneLight(p_from, light_index);
+        // 采样BSDF获取下一次射线方向
+        vec3 wo = -ray_dir;
+        vec3 wi;
+
+        vec3 up = abs(isect.normal.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+        vec3 tangent = normalize(cross(up, isect.normal));
+        vec3 bitangent = cross(isect.normal, tangent);
+
+        vec3 bsdf_dir = CosineSampleHemisphere(Rand(), Rand());
+        bsdf_dir = tangent * bsdf_dir.x + bitangent * bsdf_dir.y + isect.normal * bsdf_dir.z;
+
+        vec3 bsdf_f = vec3(1.0) / PI;
+        float bsdf_pdf = abs(dot(bsdf_dir, isect.normal)) * (1.0 / PI);
+
+        if (bsdf_pdf <= 0.0) {
+            break;
+        }
+
+        beta *= bsdf_f * abs(dot(isect.normal, bsdf_dir)) / bsdf_pdf;
+        ray_origin = isect.hit_position + ray_dir * 0.001;
+        ray_dir = bsdf_dir;
 
         // RR
-
     }
-    return vec3(0.0);
+    return radiance;
 }
 
 float RadicalInverse_VdC(uint bits) {
